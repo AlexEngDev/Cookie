@@ -2,8 +2,8 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
 /**
- * Корневой layout приложения с навигацией expo-router.
- * Скрываем стандартный заголовок для игрового интерфейса.
+ * Root layout for the app using expo-router navigation.
+ * The default header is hidden for the game interface.
  */
 export default function RootLayout() {
   return (

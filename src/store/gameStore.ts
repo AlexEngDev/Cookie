@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GameStore, GameState } from '../types';
 import { STAGES, MAX_STAGE } from '../constants/stages';
 import { UPGRADES, getUpgradeCost } from '../constants/upgrades';
+import { ACHIEVEMENTS } from '../constants/achievements';
 
 // AsyncStorage key for persisting game state
 const STORAGE_KEY = 'cookie_game_state';
@@ -15,6 +16,7 @@ const initialState: GameState = {
   clickCount: 0,
   abilities: [],
   upgrades: {},
+  unlockedAchievements: [],
 };
 
 /** Persist the game state to AsyncStorage */
@@ -48,15 +50,67 @@ function calcClickBonus(upgrades: Record<string, number>): number {
   return bonus * allIncomeMultiplier;
 }
 
+/**
+ * Calculate the total click multiplier bonus from unlocked achievements.
+ * Returns a multiplier value (e.g. 0.15 means +15%).
+ */
+function calcAchievementClickMultiplier(unlockedAchievements: string[]): number {
+  let multiplier = 0;
+  for (const achievement of ACHIEVEMENTS) {
+    if (unlockedAchievements.includes(achievement.id) && achievement.reward.type === 'clickMultiplier') {
+      multiplier += achievement.reward.value;
+    }
+  }
+  return multiplier;
+}
+
+/**
+ * Calculate the total passive income multiplier bonus from unlocked achievements.
+ * Returns a multiplier value (e.g. 0.1 means +10%).
+ */
+function calcAchievementPassiveMultiplier(unlockedAchievements: string[]): number {
+  let multiplier = 0;
+  for (const achievement of ACHIEVEMENTS) {
+    if (unlockedAchievements.includes(achievement.id) && achievement.reward.type === 'passiveMultiplier') {
+      multiplier += achievement.reward.value;
+    }
+  }
+  return multiplier;
+}
+
+/**
+ * Calculate the total flat food bonus from unlocked achievements.
+ */
+function calcAchievementFoodBonus(unlockedAchievements: string[]): number {
+  let bonus = 0;
+  for (const achievement of ACHIEVEMENTS) {
+    if (unlockedAchievements.includes(achievement.id) && achievement.reward.type === 'foodBonus') {
+      bonus += achievement.reward.value;
+    }
+  }
+  return bonus;
+}
+
+/**
+ * Return the count of total upgrade levels purchased across all upgrades.
+ */
+function countTotalUpgrades(upgrades: Record<string, number>): number {
+  return Object.values(upgrades).reduce((sum, level) => sum + level, 0);
+}
+
 /** Zustand game store */
 export const useGameStore = create<GameStore>((set, get) => ({
   ...initialState,
 
-  /** Tap the creature — awards food based on current stage click power plus upgrades */
+  /** Tap the creature — awards food based on current stage click power plus upgrades and achievement bonuses */
   clickFood: () => {
-    const { currentStage, food, totalFood, clickCount, upgrades } = get();
+    const { currentStage, food, totalFood, clickCount, upgrades, unlockedAchievements } = get();
     const stage = STAGES[currentStage];
-    const gained = stage.clickPower + calcClickBonus(upgrades);
+    const upgradeBonus = calcClickBonus(upgrades);
+    const achievementClickMult = calcAchievementClickMultiplier(unlockedAchievements);
+    const achievementFoodBonus = calcAchievementFoodBonus(unlockedAchievements);
+    const baseGain = stage.clickPower + upgradeBonus + achievementFoodBonus;
+    const gained = baseGain * (1 + achievementClickMult);
     const newState = {
       food: food + gained,
       totalFood: totalFood + gained,
@@ -64,6 +118,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     };
     set(newState);
     saveState({ ...get(), ...newState });
+    get().checkAchievements();
   },
 
   /** Advance to the next evolution stage, applying any evolution discount upgrades */
@@ -95,17 +150,21 @@ export const useGameStore = create<GameStore>((set, get) => ({
     };
     set(newState);
     saveState({ ...get(), ...newState });
+    get().checkAchievements();
   },
 
   /** Add passive food income (called by the game loop hook) */
   addPassiveFood: (amount: number) => {
-    const { food, totalFood } = get();
+    const { food, totalFood, unlockedAchievements } = get();
+    const achievementPassiveMult = calcAchievementPassiveMultiplier(unlockedAchievements);
+    const gained = amount * (1 + achievementPassiveMult);
     const newState = {
-      food: food + amount,
-      totalFood: totalFood + amount,
+      food: food + gained,
+      totalFood: totalFood + gained,
     };
     set(newState);
     saveState({ ...get(), ...newState });
+    get().checkAchievements();
   },
 
   /** Purchase one level of the specified upgrade if affordable */
@@ -126,6 +185,42 @@ export const useGameStore = create<GameStore>((set, get) => ({
     saveState({ ...get(), ...newState });
   },
 
+  /** Check all achievements and unlock any whose conditions are now met */
+  checkAchievements: () => {
+    const { totalFood, clickCount, currentStage, upgrades, unlockedAchievements } = get();
+    const totalUpgrades = countTotalUpgrades(upgrades);
+    const newlyUnlocked: string[] = [];
+
+    for (const achievement of ACHIEVEMENTS) {
+      if (unlockedAchievements.includes(achievement.id)) continue;
+
+      const { type, value, upgradeId } = achievement.condition;
+      let conditionMet = false;
+
+      if (type === 'totalFood') {
+        conditionMet = totalFood >= value;
+      } else if (type === 'clickCount') {
+        conditionMet = clickCount >= value;
+      } else if (type === 'stage') {
+        conditionMet = currentStage >= value;
+      } else if (type === 'totalUpgrades') {
+        conditionMet = totalUpgrades >= value;
+      } else if (type === 'upgradeLevel' && upgradeId) {
+        conditionMet = (upgrades[upgradeId] ?? 0) >= value;
+      }
+
+      if (conditionMet) {
+        newlyUnlocked.push(achievement.id);
+      }
+    }
+
+    if (newlyUnlocked.length > 0) {
+      const updated = [...unlockedAchievements, ...newlyUnlocked];
+      set({ unlockedAchievements: updated });
+      saveState({ ...get(), unlockedAchievements: updated });
+    }
+  },
+
   /** Reset the game back to its initial state */
   reset: () => {
     set(initialState);
@@ -140,6 +235,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         const parsed: GameState = JSON.parse(saved);
         // Ensure upgrades field exists for saves created before this update
         if (!parsed.upgrades) parsed.upgrades = {};
+        // Ensure unlockedAchievements field exists for older saves
+        if (!parsed.unlockedAchievements) parsed.unlockedAchievements = [];
         set(parsed);
       }
     } catch (e) {

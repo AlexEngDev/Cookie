@@ -1,5 +1,23 @@
 // TypeScript types for the Cookie Evolution game
 
+/** Achievement definition */
+export interface Achievement {
+  id: string;
+  name: string;
+  description: string;
+  emoji: string;
+  condition: {
+    type: 'totalFood' | 'clickCount' | 'stage' | 'upgradeLevel' | 'totalUpgrades';
+    value: number;
+    /** Used only when type is 'upgradeLevel' to specify which upgrade */
+    upgradeId?: string;
+  };
+  reward: {
+    type: 'clickMultiplier' | 'passiveMultiplier' | 'foodBonus';
+    value: number;
+  };
+}
+
 /** Evolution stage configuration */
 export interface Stage {
   id: number;
@@ -48,6 +66,8 @@ export interface GameState {
   abilities: string[];
   /** Purchased upgrade levels, keyed by upgrade id */
   upgrades: Record<string, number>;
+  /** List of unlocked achievement IDs */
+  unlockedAchievements: string[];
 }
 
 /** Game store actions */
@@ -60,6 +80,8 @@ export interface GameActions {
   addPassiveFood: (amount: number) => void;
   /** Purchase one level of an upgrade */
   buyUpgrade: (upgradeId: string) => void;
+  /** Check and unlock any newly earned achievements */
+  checkAchievements: () => void;
   /** Reset the game to its initial state */
   reset: () => void;
   /** Load previously saved game state from AsyncStorage */

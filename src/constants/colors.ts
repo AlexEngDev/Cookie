@@ -1,19 +1,19 @@
-// Цветовая палитра игры Cookie Evolution
+// Color palette for the Cookie Evolution game
 
 export const Colors = {
-  /** Цвета стадий эволюции */
+  /** Evolution stage theme colours */
   stages: {
-    /** 🦠 Микроб — зелёный */
+    /** 🦠 Microbe — green */
     microbe: '#2d6a4f',
-    /** 🐟 Существо — синий */
+    /** 🐟 Creature — blue */
     creature: '#1d3557',
-    /** 🦎 Животное — коричневый */
+    /** 🦎 Animal — brown */
     animal: '#6b4226',
-    /** 🧠 Разум — фиолетовый */
+    /** 🧠 Mind — purple */
     mind: '#4a0e8f',
   },
 
-  /** Основные цвета интерфейса */
+  /** Core UI colours */
   ui: {
     background: '#1a1a2e',
     card: 'rgba(255, 255, 255, 0.1)',
@@ -25,7 +25,7 @@ export const Colors = {
     success: '#2a9d8f',
   },
 
-  /** Цвет полосы прогресса */
+  /** Progress bar colours */
   progress: {
     track: 'rgba(255, 255, 255, 0.2)',
     fill: '#f4a261',

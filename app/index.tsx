@@ -96,13 +96,23 @@ export default function GameScreen() {
               <Text style={styles.stageName}>
                 {stage.emoji} {stage.name}
               </Text>
-              {/* Shop button — navigate to the Upgrade Shop */}
-              <TouchableOpacity
-                style={styles.shopButton}
-                onPress={() => router.push('/shop')}
-              >
-                <Text style={styles.shopButtonText}>🛍️</Text>
-              </TouchableOpacity>
+              {/* Top-right action buttons */}
+              <View style={styles.topButtons}>
+                {/* Achievements button — navigate to the Achievements screen */}
+                <TouchableOpacity
+                  style={styles.topButton}
+                  onPress={() => router.push('/achievements')}
+                >
+                  <Text style={styles.topButtonText}>🏆</Text>
+                </TouchableOpacity>
+                {/* Shop button — navigate to the Upgrade Shop */}
+                <TouchableOpacity
+                  style={styles.topButton}
+                  onPress={() => router.push('/shop')}
+                >
+                  <Text style={styles.topButtonText}>🛍️</Text>
+                </TouchableOpacity>
+              </View>
             </View>
             <Text style={styles.stageDescription}>{stage.description}</Text>
           </View>
@@ -185,9 +195,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: '100%',
   },
-  shopButton: {
+  topButtons: {
     position: 'absolute',
     right: 0,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  topButton: {
     backgroundColor: Colors.ui.card,
     borderRadius: 12,
     borderWidth: 1,
@@ -195,7 +209,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
-  shopButtonText: {
+  topButtonText: {
     fontSize: 22,
   },
   stageName: {
