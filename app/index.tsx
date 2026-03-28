@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   Alert,
 } from 'react-native';
+import { router } from 'expo-router';
 import { useGameStore } from '../src/store/gameStore';
 import { useGameLoop } from '../src/hooks/useGameLoop';
 import { STAGES, MAX_STAGE } from '../src/constants/stages';
@@ -91,9 +92,18 @@ export default function GameScreen() {
         >
           {/* Stage name and description header */}
           <View style={styles.header}>
-            <Text style={styles.stageName}>
-              {stage.emoji} {stage.name}
-            </Text>
+            <View style={styles.headerRow}>
+              <Text style={styles.stageName}>
+                {stage.emoji} {stage.name}
+              </Text>
+              {/* Shop button — navigate to the Upgrade Shop */}
+              <TouchableOpacity
+                style={styles.shopButton}
+                onPress={() => router.push('/shop')}
+              >
+                <Text style={styles.shopButtonText}>🛍️</Text>
+              </TouchableOpacity>
+            </View>
             <Text style={styles.stageDescription}>{stage.description}</Text>
           </View>
 
@@ -168,6 +178,25 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     paddingHorizontal: 20,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  shopButton: {
+    position: 'absolute',
+    right: 0,
+    backgroundColor: Colors.ui.card,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.ui.cardBorder,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  shopButtonText: {
+    fontSize: 22,
   },
   stageName: {
     fontSize: 28,
