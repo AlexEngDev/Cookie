@@ -3,19 +3,19 @@ import { TouchableOpacity, Text, StyleSheet, Animated } from 'react-native';
 import { Colors } from '../constants/colors';
 
 interface EvolveButtonProps {
-  /** Можно ли эволюционировать (хватает еды) */
+  /** Whether the player has enough food to evolve */
   canEvolve: boolean;
-  /** Эмодзи следующей стадии */
+  /** Emoji of the next evolution stage */
   nextEmoji?: string;
-  /** Название следующей стадии */
+  /** Name of the next evolution stage */
   nextName?: string;
-  /** Обработчик нажатия */
+  /** Handler called when the button is pressed */
   onPress: () => void;
 }
 
 /**
- * Кнопка эволюции — становится активной, когда накоплено достаточно еды.
- * При нажатии воспроизводит анимацию вспышки.
+ * Evolve button — becomes active when enough food has been collected.
+ * Plays a brief flash animation on press.
  */
 const EvolveButton: React.FC<EvolveButtonProps> = ({
   canEvolve,
@@ -25,7 +25,7 @@ const EvolveButton: React.FC<EvolveButtonProps> = ({
 }) => {
   const flashAnim = useRef(new Animated.Value(1)).current;
 
-  /** Анимация вспышки при эволюции */
+  /** Flash animation played when the player evolves */
   const handlePress = () => {
     if (!canEvolve) return;
 
@@ -46,11 +46,11 @@ const EvolveButton: React.FC<EvolveButtonProps> = ({
   };
 
   if (!nextEmoji) {
-    // Максимальная стадия — показываем финальное сообщение
+    // Maximum stage reached — show final message
     return (
       <Animated.View style={[styles.maxStageContainer, { transform: [{ scale: flashAnim }] }]}>
-        <Text style={styles.maxStageText}>🏆 Максимальная стадия!</Text>
-        <Text style={styles.maxStageSubText}>Ты достиг вершины эволюции</Text>
+        <Text style={styles.maxStageText}>🏆 Maximum stage reached!</Text>
+        <Text style={styles.maxStageSubText}>You have reached the pinnacle of evolution</Text>
       </Animated.View>
     );
   }
@@ -64,7 +64,7 @@ const EvolveButton: React.FC<EvolveButtonProps> = ({
         activeOpacity={0.8}
       >
         <Text style={styles.buttonText}>
-          {canEvolve ? `⬆️ Эволюционировать в ${nextEmoji} ${nextName}!` : `🔒 Нужно больше еды`}
+          {canEvolve ? `⬆️ Evolve into ${nextEmoji} ${nextName}!` : `🔒 Need more food`}
         </Text>
       </TouchableOpacity>
     </Animated.View>

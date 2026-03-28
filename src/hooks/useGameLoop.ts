@@ -3,8 +3,8 @@ import { useGameStore } from '../store/gameStore';
 import { STAGES } from '../constants/stages';
 
 /**
- * Хук игрового цикла — каждую секунду добавляет пассивный доход еды
- * в зависимости от текущей стадии эволюции.
+ * Game loop hook — every second it adds passive food income
+ * based on the current evolution stage's passiveIncome value.
  */
 export const useGameLoop = () => {
   const currentStage = useGameStore((state) => state.currentStage);
@@ -13,16 +13,16 @@ export const useGameLoop = () => {
   useEffect(() => {
     const stage = STAGES[currentStage];
 
-    // Если нет пассивного дохода — не запускаем интервал
+    // Skip the interval if the current stage has no passive income
     if (stage.passiveIncome <= 0) return;
 
     const interval = setInterval(() => {
       addPassiveFood(stage.passiveIncome);
     }, 1000);
 
-    // Очищаем интервал при смене стадии или размонтировании
+    // Clean up the interval when the stage changes or the component unmounts
     return () => clearInterval(interval);
-  // addPassiveFood — стабильная функция из Zustand, не нужна в зависимостях
+  // addPassiveFood is a stable Zustand action and does not need to be listed
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStage]);
 };

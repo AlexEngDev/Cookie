@@ -19,14 +19,14 @@ import ResourcePanel from '../src/components/ResourcePanel';
 import EvolveButton from '../src/components/EvolveButton';
 
 /**
- * Главный экран игры Cookie Evolution.
- * Содержит существо для кликов, счётчик еды, прогресс-бар и кнопку эволюции.
+ * Main game screen for Cookie Evolution.
+ * Contains the creature for tapping, a food counter, progress bar, and an evolve button.
  */
 export default function GameScreen() {
-  // Подключаем игровой цикл (пассивный доход)
+  // Start the passive income game loop
   useGameLoop();
 
-  // Получаем состояние и действия из стора
+  // Read state and actions from the game store
   const food = useGameStore((state) => state.food);
   const totalFood = useGameStore((state) => state.totalFood);
   const currentStage = useGameStore((state) => state.currentStage);
@@ -36,21 +36,21 @@ export default function GameScreen() {
   const reset = useGameStore((state) => state.reset);
   const loadSavedState = useGameStore((state) => state.loadSavedState);
 
-  // Анимация фона при смене стадии
+  // Animated value for interpolating the background colour between stages
   const bgColorAnim = useRef(new Animated.Value(0)).current;
 
   const stage = STAGES[currentStage];
   const nextStage = currentStage < MAX_STAGE ? STAGES[currentStage + 1] : undefined;
   const canEvolve = nextStage !== undefined && food >= stage.foodRequired;
 
-  // Загружаем сохранённое состояние при первом рендере
+  // Load saved progress on first render
   useEffect(() => {
     loadSavedState();
-  // loadSavedState — стабильная функция из Zustand
+  // loadSavedState is a stable Zustand action reference
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Анимируем фон при смене стадии
+  // Animate the background colour whenever the stage changes
   useEffect(() => {
     Animated.timing(bgColorAnim, {
       toValue: currentStage,
@@ -59,7 +59,7 @@ export default function GameScreen() {
     }).start();
   }, [currentStage]);
 
-  // Интерполяция цвета фона между стадиями
+  // Interpolate background colour across all four stage colours
   const backgroundColor = bgColorAnim.interpolate({
     inputRange: [0, 1, 2, 3],
     outputRange: [
@@ -70,14 +70,14 @@ export default function GameScreen() {
     ],
   });
 
-  /** Подтверждение сброса игры */
+  /** Show a confirmation dialog before resetting all progress */
   const handleReset = () => {
     Alert.alert(
-      'Сбросить игру?',
-      'Весь прогресс будет потерян. Ты уверен?',
+      'Reset Game?',
+      'All progress will be lost. Are you sure?',
       [
-        { text: 'Отмена', style: 'cancel' },
-        { text: 'Сбросить', style: 'destructive', onPress: reset },
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Reset', style: 'destructive', onPress: reset },
       ]
     );
   };
@@ -89,7 +89,7 @@ export default function GameScreen() {
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
         >
-          {/* Заголовок с названием стадии */}
+          {/* Stage name and description header */}
           <View style={styles.header}>
             <Text style={styles.stageName}>
               {stage.emoji} {stage.name}
@@ -97,7 +97,7 @@ export default function GameScreen() {
             <Text style={styles.stageDescription}>{stage.description}</Text>
           </View>
 
-          {/* Панель ресурсов */}
+          {/* Resource panel — food counters and passive income */}
           <ResourcePanel
             food={food}
             totalFood={totalFood}
@@ -105,20 +105,20 @@ export default function GameScreen() {
             clickCount={clickCount}
           />
 
-          {/* Существо — центральный элемент для кликов */}
+          {/* Creature — main tap target */}
           <View style={styles.creatureContainer}>
-            <Creature emoji={stage.emoji} onPress={clickFood} />
-            <Text style={styles.tapHint}>Тапай по существу!</Text>
+            <Creature stageIndex={currentStage} onPress={clickFood} />
+            <Text style={styles.tapHint}>Tap the creature!</Text>
           </View>
 
-          {/* Полоса прогресса до эволюции */}
+          {/* Evolution progress bar */}
           <StageBar
             current={food}
             required={stage.foodRequired}
             nextStageName={nextStage?.name}
           />
 
-          {/* Кнопка эволюции */}
+          {/* Evolve button */}
           <View style={styles.evolveContainer}>
             <EvolveButton
               canEvolve={canEvolve}
@@ -128,25 +128,25 @@ export default function GameScreen() {
             />
           </View>
 
-          {/* Способности */}
+          {/* Unlocked abilities */}
           {currentStage > 0 && (
             <View style={styles.abilitiesContainer}>
-              <Text style={styles.abilitiesTitle}>✨ Способности</Text>
+              <Text style={styles.abilitiesTitle}>✨ Abilities</Text>
               {currentStage >= 1 && (
-                <Text style={styles.abilityItem}>🌱 Пассивное питание</Text>
+                <Text style={styles.abilityItem}>🌱 Passive feeding</Text>
               )}
               {currentStage >= 2 && (
-                <Text style={styles.abilityItem}>⚡ Быстрая охота</Text>
+                <Text style={styles.abilityItem}>⚡ Fast hunting</Text>
               )}
               {currentStage >= 3 && (
-                <Text style={styles.abilityItem}>🏛️ Строительство цивилизации</Text>
+                <Text style={styles.abilityItem}>🏛️ Build civilization</Text>
               )}
             </View>
           )}
 
-          {/* Кнопка сброса */}
+          {/* Reset button */}
           <TouchableOpacity style={styles.resetButton} onPress={handleReset}>
-            <Text style={styles.resetText}>🔄 Начать заново</Text>
+            <Text style={styles.resetText}>🔄 Start over</Text>
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
@@ -224,3 +224,4 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.4)',
   },
 });
+

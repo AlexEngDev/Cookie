@@ -1,13 +1,13 @@
 import { Stage } from '../types';
 
-// Конфигурация стадий эволюции
+// Evolution stage configuration
 
 export const STAGES: Stage[] = [
   {
     id: 0,
-    name: 'Микроб',
+    name: 'Microbe',
     emoji: '🦠',
-    description: 'Начальная форма жизни. Кликай, чтобы собирать еду и выживать!',
+    description: 'The earliest form of life. Tap to collect food and survive!',
     foodRequired: 50,
     passiveIncome: 0,
     color: '#2d6a4f',
@@ -15,9 +15,9 @@ export const STAGES: Stage[] = [
   },
   {
     id: 1,
-    name: 'Существо',
+    name: 'Creature',
     emoji: '🐟',
-    description: 'Ты вырос! Теперь еда прибывает пассивно. Продолжай развиваться!',
+    description: 'You have grown! Food now trickles in passively. Keep evolving!',
     foodRequired: 300,
     passiveIncome: 2,
     color: '#1d3557',
@@ -25,9 +25,9 @@ export const STAGES: Stage[] = [
   },
   {
     id: 2,
-    name: 'Животное',
+    name: 'Animal',
     emoji: '🦎',
-    description: 'Мощное животное с развитыми инстинктами. Пассивный доход возрастает!',
+    description: 'A powerful animal with sharp instincts. Passive income rises!',
     foodRequired: 1500,
     passiveIncome: 10,
     color: '#6b4226',
@@ -35,9 +35,9 @@ export const STAGES: Stage[] = [
   },
   {
     id: 3,
-    name: 'Разум',
+    name: 'Mind',
     emoji: '🧠',
-    description: 'Высший разум! Ты строишь цивилизацию и управляешь миром.',
+    description: 'The supreme intellect! You build civilizations and shape the world.',
     foodRequired: Infinity,
     passiveIncome: 50,
     color: '#4a0e8f',
@@ -45,5 +45,5 @@ export const STAGES: Stage[] = [
   },
 ];
 
-/** Максимальная стадия (индекс) */
+/** Maximum stage index */
 export const MAX_STAGE = STAGES.length - 1;
