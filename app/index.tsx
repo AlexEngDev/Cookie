@@ -19,6 +19,7 @@ import Creature from '../src/components/Creature';
 import StageBar from '../src/components/StageBar';
 import ResourcePanel from '../src/components/ResourcePanel';
 import EvolveButton from '../src/components/EvolveButton';
+import ParticleSystem, { ParticleSystemRef } from '../src/components/ParticleSystem';
 
 /**
  * Main game screen for Cookie Evolution.
@@ -46,6 +47,9 @@ export default function GameScreen() {
 
   // Animated value for interpolating the background colour between stages
   const bgColorAnim = useRef(new Animated.Value(0)).current;
+
+  // Ref to the particle system — used to trigger the tap effect
+  const particleRef = useRef<ParticleSystemRef>(null);
 
   // Track previous achievement count to detect newly unlocked achievements
   const prevAchievementCount = useRef(unlockedAchievements.length);
@@ -93,6 +97,11 @@ export default function GameScreen() {
   const handleCreatureTap = () => {
     tapFeedback();
     clickFood();
+  };
+
+  /** Spawn particle effect at the tap coordinates (pageX/pageY from the touch event) */
+  const handleCreaturePressCoordinates = (x: number, y: number) => {
+    particleRef.current?.spawnParticles(x, y);
   };
 
   /** Evolve to the next stage and trigger haptic feedback */
@@ -163,7 +172,11 @@ export default function GameScreen() {
 
           {/* Creature — main tap target */}
           <View style={styles.creatureContainer}>
-            <Creature stageIndex={currentStage} onPress={handleCreatureTap} />
+            <Creature
+              stageIndex={currentStage}
+              onPress={handleCreatureTap}
+              onPressCoordinates={handleCreaturePressCoordinates}
+            />
             <Text style={styles.tapHint}>Tap the creature!</Text>
           </View>
 
@@ -206,6 +219,13 @@ export default function GameScreen() {
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
+
+      {/* Particle effect layer — covers the full screen but never blocks touches */}
+      <ParticleSystem
+        ref={particleRef}
+        stageIndex={currentStage}
+        clickPower={stage.clickPower}
+      />
     </Animated.View>
   );
 }

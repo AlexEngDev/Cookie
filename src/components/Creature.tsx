@@ -7,6 +7,8 @@ interface CreatureProps {
   stageIndex: number;
   /** Handler called when the creature is tapped */
   onPress: () => void;
+  /** Optional callback that receives the screen-absolute tap coordinates on press start */
+  onPressCoordinates?: (x: number, y: number) => void;
 }
 
 // ─── Stage 0: Microbe ────────────────────────────────────────────────────────
@@ -293,7 +295,7 @@ const CREATURE_BY_STAGE: Record<number, React.ReactElement> = {
  * Creature component — displays an SVG creature for the current evolution stage.
  * Plays a continuous idle breathing animation and a tap pulse animation on press.
  */
-const Creature: React.FC<CreatureProps> = ({ stageIndex, onPress }) => {
+const Creature: React.FC<CreatureProps> = ({ stageIndex, onPress, onPressCoordinates }) => {
   // Scale value used for the tap pulse animation
   const tapScale = useRef(new Animated.Value(1)).current;
   // Scale value used for the idle breathing animation
@@ -342,7 +344,12 @@ const Creature: React.FC<CreatureProps> = ({ stageIndex, onPress }) => {
   const creatureSvg = CREATURE_BY_STAGE[stageIndex] ?? CREATURE_BY_STAGE[0];
 
   return (
-    <TouchableOpacity onPress={handlePress} activeOpacity={1} style={styles.container}>
+    <TouchableOpacity
+      onPress={handlePress}
+      onPressIn={(e) => onPressCoordinates?.(e.nativeEvent.pageX, e.nativeEvent.pageY)}
+      activeOpacity={1}
+      style={styles.container}
+    >
       <Animated.View style={[styles.wrapper, { transform: [{ scale: combinedScale }] }]}>
         {creatureSvg}
       </Animated.View>
