@@ -1,0 +1,86 @@
+// Achievement definitions for the Cookie Evolution game
+import { Achievement } from '../types';
+
+/** All 10 achievements available in the game */
+export const ACHIEVEMENTS: Achievement[] = [
+  {
+    id: 'first_bite',
+    name: 'First Bite',
+    description: 'Collect 10 food total.',
+    emoji: '🥚',
+    condition: { type: 'totalFood', value: 10 },
+    reward: { type: 'foodBonus', value: 1 },
+  },
+  {
+    id: 'clicker',
+    name: 'Clicker',
+    description: 'Click the creature 50 times.',
+    emoji: '👆',
+    condition: { type: 'clickCount', value: 50 },
+    reward: { type: 'clickMultiplier', value: 0.05 },
+  },
+  {
+    id: 'feast',
+    name: 'Feast',
+    description: 'Collect 1,000 food total.',
+    emoji: '🍽️',
+    condition: { type: 'totalFood', value: 1000 },
+    reward: { type: 'passiveMultiplier', value: 0.1 },
+  },
+  {
+    id: 'evolution_begins',
+    name: 'Evolution Begins',
+    description: 'Reach Stage 1.',
+    emoji: '🧬',
+    condition: { type: 'stage', value: 1 },
+    reward: { type: 'foodBonus', value: 2 },
+  },
+  {
+    id: 'survivor',
+    name: 'Survivor',
+    description: 'Reach Stage 2.',
+    emoji: '🦎',
+    condition: { type: 'stage', value: 2 },
+    reward: { type: 'clickMultiplier', value: 0.1 },
+  },
+  {
+    id: 'enlightened',
+    name: 'Enlightened',
+    description: 'Reach Stage 3.',
+    emoji: '🧠',
+    condition: { type: 'stage', value: 3 },
+    reward: { type: 'passiveMultiplier', value: 0.2 },
+  },
+  {
+    id: 'shopaholic',
+    name: 'Shopaholic',
+    description: 'Buy 5 upgrades total.',
+    emoji: '🏪',
+    condition: { type: 'totalUpgrades', value: 5 },
+    reward: { type: 'passiveMultiplier', value: 0.05 },
+  },
+  {
+    id: 'speed_clicker',
+    name: 'Speed Clicker',
+    description: 'Click the creature 500 times.',
+    emoji: '⚡',
+    condition: { type: 'clickCount', value: 500 },
+    reward: { type: 'clickMultiplier', value: 0.1 },
+  },
+  {
+    id: 'food_flood',
+    name: 'Food Flood',
+    description: 'Collect 10,000 food total.',
+    emoji: '🌊',
+    condition: { type: 'totalFood', value: 10000 },
+    reward: { type: 'passiveMultiplier', value: 0.15 },
+  },
+  {
+    id: 'evolution_master',
+    name: 'Evolution Master',
+    description: 'Collect 100,000 food total.',
+    emoji: '👑',
+    condition: { type: 'totalFood', value: 100000 },
+    reward: { type: 'clickMultiplier', value: 0.25 },
+  },
+];
