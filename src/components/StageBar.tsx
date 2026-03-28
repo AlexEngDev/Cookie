@@ -3,20 +3,20 @@ import { View, Text, StyleSheet } from 'react-native';
 import { Colors } from '../constants/colors';
 
 interface StageBarProps {
-  /** Текущее количество еды */
+  /** Current food amount */
   current: number;
-  /** Необходимое количество еды для эволюции */
+  /** Food required to evolve */
   required: number;
-  /** Название следующей стадии */
+  /** Name of the next evolution stage */
   nextStageName?: string;
 }
 
 /**
- * Полоса прогресса эволюции — показывает, сколько еды накоплено
- * и сколько нужно для перехода на следующую стадию.
+ * Evolution progress bar — shows how much food has been collected
+ * and how much is needed to advance to the next stage.
  */
 const StageBar: React.FC<StageBarProps> = ({ current, required, nextStageName }) => {
-  // Рассчитываем процент заполнения (не более 100%)
+  // Calculate fill percentage, capped at 100 %
   const progress = required === Infinity ? 1 : Math.min(current / required, 1);
   const percent = Math.round(progress * 100);
 
@@ -24,17 +24,17 @@ const StageBar: React.FC<StageBarProps> = ({ current, required, nextStageName })
     <View style={styles.container}>
       <View style={styles.labelRow}>
         <Text style={styles.label}>
-          {required === Infinity ? 'Максимальная стадия!' : `До эволюции: ${nextStageName}`}
+          {required === Infinity ? 'Maximum stage reached!' : `To evolve: ${nextStageName}`}
         </Text>
         <Text style={styles.percent}>{required === Infinity ? '✨' : `${percent}%`}</Text>
       </View>
 
-      {/* Полоса прогресса */}
+      {/* Progress track */}
       <View style={styles.track}>
         <View style={[styles.fill, { width: `${percent}%` }]} />
       </View>
 
-      {/* Счётчик еды */}
+      {/* Food counter */}
       {required !== Infinity && (
         <Text style={styles.counter}>
           {Math.floor(current)} / {required} 🍖

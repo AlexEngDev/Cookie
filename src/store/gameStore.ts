@@ -3,10 +3,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GameStore, GameState } from '../types';
 import { STAGES, MAX_STAGE } from '../constants/stages';
 
-// Ключ для AsyncStorage
+// AsyncStorage key for persisting game state
 const STORAGE_KEY = 'cookie_game_state';
 
-/** Начальное состояние игры */
+/** Default starting state for a new game */
 const initialState: GameState = {
   food: 0,
   totalFood: 0,
@@ -15,20 +15,20 @@ const initialState: GameState = {
   abilities: [],
 };
 
-/** Сохранить состояние в AsyncStorage */
+/** Persist the game state to AsyncStorage */
 const saveState = async (state: GameState) => {
   try {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
-    console.warn('Ошибка сохранения состояния:', e);
+    console.warn('Failed to save game state:', e);
   }
 };
 
-/** Zustand стор игры */
+/** Zustand game store */
 export const useGameStore = create<GameStore>((set, get) => ({
   ...initialState,
 
-  /** Клик по существу — добавляет еду */
+  /** Tap the creature — awards food based on current stage click power */
   clickFood: () => {
     const { currentStage, food, totalFood, clickCount } = get();
     const stage = STAGES[currentStage];
@@ -42,18 +42,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
     saveState({ ...get(), ...newState });
   },
 
-  /** Эволюция на следующую стадию */
+  /** Advance to the next evolution stage */
   evolve: () => {
     const { currentStage, food } = get();
     const stage = STAGES[currentStage];
 
-    // Проверяем, что хватает еды и не достигли максимальной стадии
+    // Ensure the player has enough food and hasn't already reached the final stage
     if (food < stage.foodRequired || currentStage >= MAX_STAGE) return;
 
     const newStage = currentStage + 1;
     const newAbilities = [...get().abilities];
 
-    // Разблокировать новые способности при эволюции
+    // Unlock new abilities when evolving
     if (newStage === 1) newAbilities.push('passive_income');
     if (newStage === 2) newAbilities.push('fast_hunting');
     if (newStage === 3) newAbilities.push('civilization');
@@ -67,7 +67,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     saveState({ ...get(), ...newState });
   },
 
-  /** Добавить пассивную еду (вызывается из игрового цикла) */
+  /** Add passive food income (called by the game loop hook) */
   addPassiveFood: (amount: number) => {
     const { food, totalFood } = get();
     const newState = {
@@ -78,13 +78,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
     saveState({ ...get(), ...newState });
   },
 
-  /** Сбросить игру до начального состояния */
+  /** Reset the game back to its initial state */
   reset: () => {
     set(initialState);
     saveState(initialState);
   },
 
-  /** Загрузить сохранённое состояние из AsyncStorage */
+  /** Load previously saved game state from AsyncStorage */
   loadSavedState: async () => {
     try {
       const saved = await AsyncStorage.getItem(STORAGE_KEY);
@@ -93,7 +93,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         set(parsed);
       }
     } catch (e) {
-      console.warn('Ошибка загрузки состояния:', e);
+      console.warn('Failed to load saved game state:', e);
     }
   },
 }));

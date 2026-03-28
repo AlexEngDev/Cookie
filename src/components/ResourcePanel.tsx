@@ -3,19 +3,19 @@ import { View, Text, StyleSheet } from 'react-native';
 import { Colors } from '../constants/colors';
 
 interface ResourcePanelProps {
-  /** Текущее количество еды */
+  /** Current food amount */
   food: number;
-  /** Всего собрано еды */
+  /** Total food ever collected */
   totalFood: number;
-  /** Пассивный доход в секунду */
+  /** Passive income per second */
   passiveIncome: number;
-  /** Количество кликов */
+  /** Number of taps */
   clickCount: number;
 }
 
 /**
- * Панель ресурсов — отображает текущую еду, пассивный доход
- * и общую статистику игры.
+ * Resource panel — shows current food, passive income rate,
+ * and overall game statistics.
  */
 const ResourcePanel: React.FC<ResourcePanelProps> = ({
   food,
@@ -25,28 +25,28 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({
 }) => {
   return (
     <View style={styles.container}>
-      {/* Основной счётчик еды */}
+      {/* Main food counter */}
       <View style={styles.mainResource}>
         <Text style={styles.foodEmoji}>🍖</Text>
         <Text style={styles.foodCount}>{Math.floor(food)}</Text>
-        <Text style={styles.foodLabel}>еды</Text>
+        <Text style={styles.foodLabel}>food</Text>
       </View>
 
-      {/* Дополнительная статистика */}
+      {/* Secondary stats */}
       <View style={styles.stats}>
         {passiveIncome > 0 && (
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>+{passiveIncome}/сек</Text>
-            <Text style={styles.statLabel}>пассивно</Text>
+            <Text style={styles.statValue}>+{passiveIncome}/sec</Text>
+            <Text style={styles.statLabel}>passive</Text>
           </View>
         )}
         <View style={styles.statItem}>
           <Text style={styles.statValue}>{clickCount}</Text>
-          <Text style={styles.statLabel}>кликов</Text>
+          <Text style={styles.statLabel}>taps</Text>
         </View>
         <View style={styles.statItem}>
           <Text style={styles.statValue}>{Math.floor(totalFood)}</Text>
-          <Text style={styles.statLabel}>всего</Text>
+          <Text style={styles.statLabel}>total</Text>
         </View>
       </View>
     </View>
