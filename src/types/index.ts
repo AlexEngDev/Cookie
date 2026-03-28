@@ -68,6 +68,8 @@ export interface GameState {
   upgrades: Record<string, number>;
   /** List of unlocked achievement IDs */
   unlockedAchievements: string[];
+  /** Whether haptic feedback is enabled (toggled by the mute button) */
+  hapticsEnabled: boolean;
 }
 
 /** Game store actions */
@@ -86,6 +88,8 @@ export interface GameActions {
   reset: () => void;
   /** Load previously saved game state from AsyncStorage */
   loadSavedState: () => Promise<void>;
+  /** Toggle haptic feedback on or off */
+  toggleHaptics: () => void;
 }
 
 /** Full store type (state + actions) */
