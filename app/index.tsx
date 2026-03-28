@@ -12,6 +12,7 @@ import {
 import { router } from 'expo-router';
 import { useGameStore } from '../src/store/gameStore';
 import { useGameLoop } from '../src/hooks/useGameLoop';
+import useHaptics from '../src/hooks/useHaptics';
 import { STAGES, MAX_STAGE } from '../src/constants/stages';
 import { Colors } from '../src/constants/colors';
 import Creature from '../src/components/Creature';
@@ -27,6 +28,9 @@ export default function GameScreen() {
   // Start the passive income game loop
   useGameLoop();
 
+  // Haptic feedback functions
+  const { tapFeedback, evolveFeedback, achievementFeedback } = useHaptics();
+
   // Read state and actions from the game store
   const food = useGameStore((state) => state.food);
   const totalFood = useGameStore((state) => state.totalFood);
@@ -36,9 +40,15 @@ export default function GameScreen() {
   const evolve = useGameStore((state) => state.evolve);
   const reset = useGameStore((state) => state.reset);
   const loadSavedState = useGameStore((state) => state.loadSavedState);
+  const hapticsEnabled = useGameStore((state) => state.hapticsEnabled);
+  const toggleHaptics = useGameStore((state) => state.toggleHaptics);
+  const unlockedAchievements = useGameStore((state) => state.unlockedAchievements);
 
   // Animated value for interpolating the background colour between stages
   const bgColorAnim = useRef(new Animated.Value(0)).current;
+
+  // Track previous achievement count to detect newly unlocked achievements
+  const prevAchievementCount = useRef(unlockedAchievements.length);
 
   const stage = STAGES[currentStage];
   const nextStage = currentStage < MAX_STAGE ? STAGES[currentStage + 1] : undefined;
@@ -60,6 +70,14 @@ export default function GameScreen() {
     }).start();
   }, [currentStage]);
 
+  // Fire achievement haptic when a new achievement is unlocked
+  useEffect(() => {
+    if (unlockedAchievements.length > prevAchievementCount.current) {
+      achievementFeedback();
+    }
+    prevAchievementCount.current = unlockedAchievements.length;
+  }, [unlockedAchievements.length, achievementFeedback]);
+
   // Interpolate background colour across all four stage colours
   const backgroundColor = bgColorAnim.interpolate({
     inputRange: [0, 1, 2, 3],
@@ -70,6 +88,18 @@ export default function GameScreen() {
       STAGES[3].color,
     ],
   });
+
+  /** Tap the creature — award food and trigger haptic feedback */
+  const handleCreatureTap = () => {
+    tapFeedback();
+    clickFood();
+  };
+
+  /** Evolve to the next stage and trigger haptic feedback */
+  const handleEvolve = () => {
+    evolveFeedback();
+    evolve();
+  };
 
   /** Show a confirmation dialog before resetting all progress */
   const handleReset = () => {
@@ -93,9 +123,15 @@ export default function GameScreen() {
           {/* Stage name and description header */}
           <View style={styles.header}>
             <View style={styles.headerRow}>
+              {/* Top-left: haptics mute/unmute toggle */}
+              <TouchableOpacity style={styles.topButton} onPress={toggleHaptics}>
+                <Text style={styles.topButtonText}>{hapticsEnabled ? '🔊' : '🔇'}</Text>
+              </TouchableOpacity>
+
               <Text style={styles.stageName}>
                 {stage.emoji} {stage.name}
               </Text>
+
               {/* Top-right action buttons */}
               <View style={styles.topButtons}>
                 {/* Achievements button — navigate to the Achievements screen */}
@@ -127,7 +163,7 @@ export default function GameScreen() {
 
           {/* Creature — main tap target */}
           <View style={styles.creatureContainer}>
-            <Creature stageIndex={currentStage} onPress={clickFood} />
+            <Creature stageIndex={currentStage} onPress={handleCreatureTap} />
             <Text style={styles.tapHint}>Tap the creature!</Text>
           </View>
 
@@ -144,7 +180,7 @@ export default function GameScreen() {
               canEvolve={canEvolve}
               nextEmoji={nextStage?.emoji}
               nextName={nextStage?.name}
-              onPress={evolve}
+              onPress={handleEvolve}
             />
           </View>
 

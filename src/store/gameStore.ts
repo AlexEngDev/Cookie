@@ -17,6 +17,7 @@ const initialState: GameState = {
   abilities: [],
   upgrades: {},
   unlockedAchievements: [],
+  hapticsEnabled: true,
 };
 
 /** Persist the game state to AsyncStorage */
@@ -227,6 +228,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
     saveState(initialState);
   },
 
+  /** Toggle haptic feedback on / off and persist the preference */
+  toggleHaptics: () => {
+    const { hapticsEnabled } = get();
+    const newState = { hapticsEnabled: !hapticsEnabled };
+    set(newState);
+    saveState({ ...get(), ...newState });
+  },
+
   /** Load previously saved game state from AsyncStorage */
   loadSavedState: async () => {
     try {
@@ -237,6 +246,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         if (!parsed.upgrades) parsed.upgrades = {};
         // Ensure unlockedAchievements field exists for older saves
         if (!parsed.unlockedAchievements) parsed.unlockedAchievements = [];
+        // Ensure hapticsEnabled exists for older saves (default: true)
+        if (parsed.hapticsEnabled === undefined) parsed.hapticsEnabled = true;
         set(parsed);
       }
     } catch (e) {

@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { useGameStore } from '../src/store/gameStore';
+import useHaptics from '../src/hooks/useHaptics';
 import { UPGRADES, getUpgradeCost } from '../src/constants/upgrades';
 import { STAGES } from '../src/constants/stages';
 import { Colors } from '../src/constants/colors';
@@ -25,8 +26,17 @@ export default function ShopScreen() {
   const upgrades = useGameStore((state) => state.upgrades);
   const buyUpgrade = useGameStore((state) => state.buyUpgrade);
 
+  // Haptic feedback for upgrade purchases
+  const { purchaseFeedback } = useHaptics();
+
   // Use the current stage colour as the background tint
   const stageColor = STAGES[currentStage].color;
+
+  /** Buy an upgrade and trigger purchase haptic feedback */
+  const handleBuy = (upgradeId: string) => {
+    purchaseFeedback();
+    buyUpgrade(upgradeId);
+  };
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: stageColor }]}>
@@ -50,7 +60,7 @@ export default function ShopScreen() {
             upgrade={upgrade}
             currentLevel={upgrades[upgrade.id] ?? 0}
             food={food}
-            onBuy={() => buyUpgrade(upgrade.id)}
+            onBuy={() => handleBuy(upgrade.id)}
           />
         ))}
       </ScrollView>
