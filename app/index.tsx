@@ -1,29 +1,30 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Animated,
   SafeAreaView,
-  ScrollView,
   TouchableOpacity,
   Alert,
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { router } from 'expo-router';
 import { useGameStore } from '../src/store/gameStore';
 import { useGameLoop } from '../src/hooks/useGameLoop';
 import useHaptics from '../src/hooks/useHaptics';
 import { STAGES, MAX_STAGE } from '../src/constants/stages';
 import { Colors } from '../src/constants/colors';
-import Creature from '../src/components/Creature';
 import StageBar from '../src/components/StageBar';
 import ResourcePanel from '../src/components/ResourcePanel';
 import EvolveButton from '../src/components/EvolveButton';
 import ParticleSystem, { ParticleSystemRef } from '../src/components/ParticleSystem';
+import WorldMap from '../src/components/WorldMap';
 
 /**
  * Main game screen for Cookie Evolution.
- * Contains the creature for tapping, a food counter, progress bar, and an evolve button.
+ * Displays a 2D pan-able world with the creature, food items, and decorations.
+ * A fixed HUD overlay shows the resource panel, progress bar, and evolve button.
  */
 export default function GameScreen() {
   // Start the passive income game loop
@@ -94,15 +95,21 @@ export default function GameScreen() {
   });
 
   /** Tap the creature — award food and trigger haptic feedback */
-  const handleCreatureTap = () => {
+  const handleCreatureTap = useCallback(() => {
     tapFeedback();
     clickFood();
-  };
+  }, [tapFeedback, clickFood]);
+
+  /** Collect a food item from the world — award food and trigger haptic feedback */
+  const handleFoodCollected = useCallback(() => {
+    tapFeedback();
+    clickFood();
+  }, [tapFeedback, clickFood]);
 
   /** Spawn particle effect at the tap coordinates (pageX/pageY from the touch event) */
-  const handleCreaturePressCoordinates = (x: number, y: number) => {
+  const handleCreaturePressCoordinates = useCallback((x: number, y: number) => {
     particleRef.current?.spawnParticles(x, y);
-  };
+  }, []);
 
   /** Evolve to the next stage and trigger haptic feedback */
   const handleEvolve = () => {
@@ -123,46 +130,47 @@ export default function GameScreen() {
   };
 
   return (
-    <Animated.View style={[styles.root, { backgroundColor }]}>
-      <SafeAreaView style={styles.safe}>
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Stage name and description header */}
-          <View style={styles.header}>
-            <View style={styles.headerRow}>
-              {/* Top-left: haptics mute/unmute toggle */}
-              <TouchableOpacity style={styles.topButton} onPress={toggleHaptics}>
-                <Text style={styles.topButtonText}>{hapticsEnabled ? '🔊' : '🔇'}</Text>
+    <GestureHandlerRootView style={styles.root}>
+      <Animated.View style={[styles.root, { backgroundColor }]}>
+
+        {/* 2D World — panning canvas fills the full screen */}
+        <WorldMap
+          stageIndex={currentStage}
+          onCreatureTap={handleCreatureTap}
+          onCreatureTapCoordinates={handleCreaturePressCoordinates}
+          onFoodCollected={handleFoodCollected}
+        />
+
+        {/* Fixed HUD — always on top, touches pass through to world behind */}
+        <SafeAreaView style={styles.hud} pointerEvents="box-none">
+
+          {/* Top bar: mute | stage name | achievements | shop */}
+          <View style={styles.topBar} pointerEvents="box-none">
+            <TouchableOpacity style={styles.topButton} onPress={toggleHaptics}>
+              <Text style={styles.topButtonText}>{hapticsEnabled ? '🔊' : '🔇'}</Text>
+            </TouchableOpacity>
+
+            <Text style={styles.stageName}>
+              {stage.emoji} {stage.name}
+            </Text>
+
+            <View style={styles.topButtons}>
+              <TouchableOpacity
+                style={styles.topButton}
+                onPress={() => router.push('/achievements')}
+              >
+                <Text style={styles.topButtonText}>🏆</Text>
               </TouchableOpacity>
-
-              <Text style={styles.stageName}>
-                {stage.emoji} {stage.name}
-              </Text>
-
-              {/* Top-right action buttons */}
-              <View style={styles.topButtons}>
-                {/* Achievements button — navigate to the Achievements screen */}
-                <TouchableOpacity
-                  style={styles.topButton}
-                  onPress={() => router.push('/achievements')}
-                >
-                  <Text style={styles.topButtonText}>🏆</Text>
-                </TouchableOpacity>
-                {/* Shop button — navigate to the Upgrade Shop */}
-                <TouchableOpacity
-                  style={styles.topButton}
-                  onPress={() => router.push('/shop')}
-                >
-                  <Text style={styles.topButtonText}>🛍️</Text>
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity
+                style={styles.topButton}
+                onPress={() => router.push('/shop')}
+              >
+                <Text style={styles.topButtonText}>🛍️</Text>
+              </TouchableOpacity>
             </View>
-            <Text style={styles.stageDescription}>{stage.description}</Text>
           </View>
 
-          {/* Resource panel — food counters and passive income */}
+          {/* Resource bar: food counter + passive income */}
           <ResourcePanel
             food={food}
             totalFood={totalFood}
@@ -170,63 +178,38 @@ export default function GameScreen() {
             clickCount={clickCount}
           />
 
-          {/* Creature — main tap target */}
-          <View style={styles.creatureContainer}>
-            <Creature
-              stageIndex={currentStage}
-              onPress={handleCreatureTap}
-              onPressCoordinates={handleCreaturePressCoordinates}
+          {/* Spacer — keeps the bottom HUD pinned to the bottom */}
+          <View style={styles.flex1} pointerEvents="none" />
+
+          {/* Bottom HUD: evolution progress bar + evolve button + reset */}
+          <View style={styles.bottomHud} pointerEvents="box-none">
+            <StageBar
+              current={food}
+              required={stage.foodRequired}
+              nextStageName={nextStage?.name}
             />
-            <Text style={styles.tapHint}>Tap the creature!</Text>
-          </View>
-
-          {/* Evolution progress bar */}
-          <StageBar
-            current={food}
-            required={stage.foodRequired}
-            nextStageName={nextStage?.name}
-          />
-
-          {/* Evolve button */}
-          <View style={styles.evolveContainer}>
             <EvolveButton
               canEvolve={canEvolve}
               nextEmoji={nextStage?.emoji}
               nextName={nextStage?.name}
               onPress={handleEvolve}
             />
+            <TouchableOpacity style={styles.resetButton} onPress={handleReset}>
+              <Text style={styles.resetText}>🔄 Start over</Text>
+            </TouchableOpacity>
           </View>
 
-          {/* Unlocked abilities */}
-          {currentStage > 0 && (
-            <View style={styles.abilitiesContainer}>
-              <Text style={styles.abilitiesTitle}>✨ Abilities</Text>
-              {currentStage >= 1 && (
-                <Text style={styles.abilityItem}>🌱 Passive feeding</Text>
-              )}
-              {currentStage >= 2 && (
-                <Text style={styles.abilityItem}>⚡ Fast hunting</Text>
-              )}
-              {currentStage >= 3 && (
-                <Text style={styles.abilityItem}>🏛️ Build civilization</Text>
-              )}
-            </View>
-          )}
+        </SafeAreaView>
 
-          {/* Reset button */}
-          <TouchableOpacity style={styles.resetButton} onPress={handleReset}>
-            <Text style={styles.resetText}>🔄 Start over</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </SafeAreaView>
+        {/* Particle effect layer — covers the full screen but never blocks touches */}
+        <ParticleSystem
+          ref={particleRef}
+          stageIndex={currentStage}
+          clickPower={stage.clickPower}
+        />
 
-      {/* Particle effect layer — covers the full screen but never blocks touches */}
-      <ParticleSystem
-        ref={particleRef}
-        stageIndex={currentStage}
-        clickPower={stage.clickPower}
-      />
-    </Animated.View>
+      </Animated.View>
+    </GestureHandlerRootView>
   );
 }
 
@@ -234,26 +217,19 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
   },
-  safe: {
-    flex: 1,
+  /** Fixed HUD overlay covering the whole screen, non-blocking by default */
+  hud: {
+    ...StyleSheet.absoluteFillObject,
   },
-  scroll: {
-    paddingVertical: 20,
-    gap: 20,
-  },
-  header: {
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  headerRow: {
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
   },
   topButtons: {
-    position: 'absolute',
-    right: 0,
     flexDirection: 'row',
     gap: 8,
   },
@@ -269,54 +245,24 @@ const styles = StyleSheet.create({
     fontSize: 22,
   },
   stageName: {
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: 'bold',
     color: Colors.ui.text,
     textAlign: 'center',
+    flex: 1,
+    marginHorizontal: 8,
   },
-  stageDescription: {
-    fontSize: 14,
-    color: Colors.ui.textSecondary,
-    textAlign: 'center',
-    marginTop: 6,
+  flex1: {
+    flex: 1,
   },
-  creatureContainer: {
-    alignItems: 'center',
-    paddingVertical: 20,
-    gap: 12,
-  },
-  tapHint: {
-    fontSize: 13,
-    color: Colors.ui.textSecondary,
-    fontStyle: 'italic',
-  },
-  evolveContainer: {
-    paddingHorizontal: 0,
-  },
-  abilitiesContainer: {
-    marginHorizontal: 16,
-    padding: 16,
-    backgroundColor: Colors.ui.card,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.ui.cardBorder,
+  bottomHud: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
     gap: 8,
-  },
-  abilitiesTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: Colors.ui.text,
-    marginBottom: 4,
-  },
-  abilityItem: {
-    fontSize: 14,
-    color: Colors.ui.textSecondary,
   },
   resetButton: {
     alignItems: 'center',
-    paddingVertical: 12,
-    marginHorizontal: 16,
-    marginBottom: 10,
+    paddingVertical: 8,
   },
   resetText: {
     fontSize: 13,
