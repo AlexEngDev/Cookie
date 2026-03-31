@@ -5,8 +5,8 @@ import Svg, { Circle, Ellipse, Path, Line, Polygon, G } from 'react-native-svg';
 interface CreatureProps {
   /** Index of the current evolution stage (0–3) */
   stageIndex: number;
-  /** Handler called when the creature is tapped */
-  onPress: () => void;
+  /** Handler called when the creature is tapped (optional) */
+  onPress?: () => void;
   /** Optional callback that receives the screen-absolute tap coordinates on press start */
   onPressCoordinates?: (x: number, y: number) => void;
 }
@@ -335,7 +335,7 @@ const Creature: React.FC<CreatureProps> = ({ stageIndex, onPress, onPressCoordin
         useNativeDriver: true,
       }),
     ]).start();
-    onPress();
+    onPress?.();
   };
 
   // Combine tap and breathing scales so both animations run without conflict

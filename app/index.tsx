@@ -94,22 +94,11 @@ export default function GameScreen() {
     ],
   });
 
-  /** Tap the creature — award food and trigger haptic feedback */
-  const handleCreatureTap = useCallback(() => {
-    tapFeedback();
-    clickFood();
-  }, [tapFeedback, clickFood]);
-
   /** Collect a food item from the world — award food and trigger haptic feedback */
   const handleFoodCollected = useCallback(() => {
     tapFeedback();
     clickFood();
   }, [tapFeedback, clickFood]);
-
-  /** Spawn particle effect at the tap coordinates (pageX/pageY from the touch event) */
-  const handleCreaturePressCoordinates = useCallback((x: number, y: number) => {
-    particleRef.current?.spawnParticles(x, y);
-  }, []);
 
   /** Evolve to the next stage and trigger haptic feedback */
   const handleEvolve = () => {
@@ -133,11 +122,9 @@ export default function GameScreen() {
     <GestureHandlerRootView style={styles.root}>
       <Animated.View style={[styles.root, { backgroundColor }]}>
 
-        {/* 2D World — panning canvas fills the full screen */}
+        {/* 2D World — creature moves toward touch, fills the full screen */}
         <WorldMap
           stageIndex={currentStage}
-          onCreatureTap={handleCreatureTap}
-          onCreatureTapCoordinates={handleCreaturePressCoordinates}
           onFoodCollected={handleFoodCollected}
         />
 
