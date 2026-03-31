@@ -20,6 +20,9 @@ const initialState: GameState = {
   hapticsEnabled: true,
   mutations: { speedLevel: 0, spikesLevel: 0, jawsLevel: 0 },
   dietScore: 0,
+  maxHealth: 3,
+  currentHealth: 3,
+  deathCount: 0,
 };
 
 /** Persist the game state to AsyncStorage */
@@ -246,6 +249,43 @@ export const useGameStore = create<GameStore>((set, get) => ({
     saveState({ ...get(), ...newState });
   },
 
+  /** Deduct health; if it reaches 0, trigger die() */
+  takeDamage: (amount: number = 1) => {
+    const { currentHealth } = get();
+    const newHealth = currentHealth - amount;
+    if (newHealth <= 0) {
+      // Briefly show 0 hearts before the death handler resets health
+      set({ currentHealth: 0 });
+      get().die();
+    } else {
+      const newState = { currentHealth: newHealth };
+      set(newState);
+      saveState({ ...get(), ...newState });
+    }
+  },
+
+  /** Restore health, capped at maxHealth */
+  heal: (amount: number = 1) => {
+    const { currentHealth, maxHealth } = get();
+    if (currentHealth >= maxHealth) return;
+    const newState = { currentHealth: Math.min(maxHealth, currentHealth + amount) };
+    set(newState);
+    saveState({ ...get(), ...newState });
+  },
+
+  /** Handle player death: lose 25% of food and reset health to maxHealth */
+  die: () => {
+    const { food, maxHealth, deathCount } = get();
+    const penalty = Math.floor(food * 0.25);
+    const newState = {
+      food: Math.max(0, food - penalty),
+      currentHealth: maxHealth,
+      deathCount: deathCount + 1,
+    };
+    set(newState);
+    saveState({ ...get(), ...newState });
+  },
+
   /** Purchase one level of a mutation if the player can afford it */
   buyMutation: (type: 'speed' | 'spikes' | 'jaws', cost: number) => {
     const MAX_MUTATION_LEVEL = 5;
@@ -285,6 +325,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
         if (!parsed.mutations) parsed.mutations = { speedLevel: 0, spikesLevel: 0, jawsLevel: 0 };
         // Ensure dietScore exists for saves created before the diet system
         if (parsed.dietScore === undefined) parsed.dietScore = 0;
+        // Ensure health fields exist for saves created before the HP system
+        if (parsed.maxHealth === undefined) parsed.maxHealth = 3;
+        if (parsed.currentHealth === undefined) parsed.currentHealth = 3;
+        if (parsed.deathCount === undefined) parsed.deathCount = 0;
         set(parsed);
       }
     } catch (e) {

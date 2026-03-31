@@ -95,6 +95,12 @@ export interface GameState {
    * Decreases when eating plants, increases when eating meat/prey.
    */
   dietScore: number;
+  /** Maximum number of health points (hearts) */
+  maxHealth: number;
+  /** Current health points remaining */
+  currentHealth: number;
+  /** Increments each time the player dies — used to trigger the death overlay */
+  deathCount: number;
 }
 
 /** Game store actions */
@@ -128,6 +134,23 @@ export interface GameActions {
    * Score is capped at [-100, 100].
    */
   eatFoodType: (type: 'plant' | 'meat') => void;
+  /**
+   * Deduct health when the player is damaged.
+   * If health reaches 0, `die()` is called automatically.
+   * @param amount Number of hearts to remove (default 1).
+   */
+  takeDamage: (amount?: number) => void;
+  /**
+   * Restore health points, capped at `maxHealth`.
+   * No-op if already at full health.
+   * @param amount Number of hearts to restore (default 1).
+   */
+  heal: (amount?: number) => void;
+  /**
+   * Handle player death: lose 25 % of current food and reset health to `maxHealth`.
+   * Also increments `deathCount` so the UI can show the death overlay.
+   */
+  die: () => void;
 }
 
 /** Full store type (state + actions) */
