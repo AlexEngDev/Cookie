@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { STAGES } from '../../src/constants/stages';
 import Creature from './Creature';
+import DashButton from './DashButton';
 
 // ─── World constants ──────────────────────────────────────────────────────────
 
@@ -65,6 +66,17 @@ const INVUL_FLASH_HALF_DURATION = INVULNERABILITY_MS / INVUL_FLASH_COUNT / 2;
 const AI_MARGIN = 60;
 /** Probability per frame that a wandering AI picks a new random direction */
 const WANDER_CHANGE_CHANCE = 0.008;
+
+// ─── Dash ability constants ───────────────────────────────────────────────────
+
+/** How long (ms) the dash speed boost lasts */
+const DASH_DURATION_MS = 1500;
+/** Cooldown (ms) before the dash can be used again */
+const DASH_COOLDOWN_MS = 5000;
+/** Speed multiplier applied to creature movement while dashing */
+const DASH_SPEED_MULTIPLIER = 2.5;
+/** Food cost deducted each time the player activates a dash */
+const DASH_FOOD_COST = 3;
 
 // ─── Decoration seeds (static, deterministic) ─────────────────────────────────
 
@@ -217,6 +229,8 @@ interface WorldMapProps {
   mutations?: { speedLevel: number; spikesLevel: number; jawsLevel: number };
   /** Current diet score (-100 = herbivore, 0 = omnivore, +100 = carnivore) */
   dietScore?: number;
+  /** Called when the player activates a dash — receives the food cost to deduct */
+  onDashActivated?: (foodCost: number) => void;
 }
 
 // ─── FoodSprite ──────────────────────────────────────────────────────────────
@@ -385,6 +399,7 @@ const WorldMap: React.FC<WorldMapProps> = ({
   onPredatorEaten = () => {},
   mutations,
   dietScore = 0,
+  onDashActivated,
 }) => {
   const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -664,6 +679,22 @@ const WorldMap: React.FC<WorldMapProps> = ({
   /** Animated opacity used to flash the player creature during invulnerability */
   const invulOpacity = useRef(new Animated.Value(1)).current;
 
+  // ── Dash ability state ───────────────────────────────────────────────────────
+
+  /** True while the dash speed boost is active (read in the RAF loop) */
+  const isDashingRef = useRef(false);
+  /** Timestamp (ms) when the current dash was activated */
+  const dashStartTimeRef = useRef(0);
+  /** Timestamp (ms) when the cooldown started (0 = never used) */
+  const dashCooldownStartTimeRef = useRef(0);
+  /** Last integer cooldown value sent to React state — avoids redundant re-renders */
+  const dashCooldownSecsRef = useRef(0);
+
+  /** React state mirror of isDashingRef — drives DashButton visual */
+  const [isDashingUI, setIsDashingUI] = useState(false);
+  /** Seconds remaining on the cooldown (0 = ready) — drives DashButton countdown */
+  const [dashCooldownSecs, setDashCooldownSecs] = useState(0);
+
   /**
    * Indices of prey currently mid-respawn.
    * Prevents duplicate collision triggers while the entity is transitioning.
@@ -776,6 +807,33 @@ const WorldMap: React.FC<WorldMapProps> = ({
       const dy = targetYRef.current - cy;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
+      // ── Dash timing management ─────────────────────────────────────────────
+      const now = Date.now();
+      if (isDashingRef.current) {
+        if (now - dashStartTimeRef.current >= DASH_DURATION_MS) {
+          // Dash duration expired — start the cooldown
+          isDashingRef.current = false;
+          dashCooldownStartTimeRef.current = now;
+          setIsDashingUI(false);
+        }
+      } else if (dashCooldownStartTimeRef.current > 0) {
+        const elapsed = now - dashCooldownStartTimeRef.current;
+        if (elapsed >= DASH_COOLDOWN_MS) {
+          // Cooldown finished — mark as ready
+          if (dashCooldownSecsRef.current !== 0) {
+            dashCooldownSecsRef.current = 0;
+            setDashCooldownSecs(0);
+          }
+        } else {
+          // Update the displayed countdown once per integer-second tick
+          const remaining = Math.ceil((DASH_COOLDOWN_MS - elapsed) / 1000);
+          if (remaining !== dashCooldownSecsRef.current) {
+            dashCooldownSecsRef.current = remaining;
+            setDashCooldownSecs(remaining);
+          }
+        }
+      }
+
       // ── Dynamic radii based on current player size ────────────────────────
       const pSize = playerSizeRef.current;
       const sizeRatio = pSize / BASE_PLAYER_SIZE;
@@ -792,6 +850,10 @@ const WorldMap: React.FC<WorldMapProps> = ({
         // Herbivore diet bonus: +17% speed when score < -30
         if (dietScoreRef.current < -30) {
           effectiveSpeed *= 1.17;
+        }
+        // Dash ability: multiply speed while active
+        if (isDashingRef.current) {
+          effectiveSpeed *= DASH_SPEED_MULTIPLIER;
         }
         // Advance toward the target (cap at remaining distance to avoid overshoot)
         const step = Math.min(effectiveSpeed, dist);
@@ -990,6 +1052,19 @@ const WorldMap: React.FC<WorldMapProps> = ({
     targetYRef.current = Math.max(0, Math.min(WORLD_SIZE, screenY + cameraYRef.current));
   }, []);
 
+  // ── Dash ability handler ─────────────────────────────────────────────────────
+
+  /** Activate the dash — apply speed boost, deduct food cost, and start the cooldown timer. */
+  const handleDash = useCallback(() => {
+    if (isDashingRef.current || dashCooldownSecsRef.current !== 0) return;
+    if (playerFood < DASH_FOOD_COST) return;
+
+    isDashingRef.current = true;
+    dashStartTimeRef.current = Date.now();
+    setIsDashingUI(true);
+    onDashActivated?.(DASH_FOOD_COST);
+  }, [playerFood, onDashActivated]);
+
   // ── Background colour ───────────────────────────────────────────────────────
 
   const stageBgColor = STAGES[stageIndex]?.color ?? STAGES[0].color;
@@ -1122,6 +1197,14 @@ const WorldMap: React.FC<WorldMapProps> = ({
         playerBlip={minimapPlayerBlip}
         foodBlips={minimapFoodBlips}
         aiBlips={minimapAiBlips}
+      />
+
+      {/* ── Dash action button ───────────────────────────────────────────── */}
+      <DashButton
+        isDashing={isDashingUI}
+        cooldownSecs={dashCooldownSecs}
+        canAfford={playerFood >= DASH_FOOD_COST}
+        onPress={handleDash}
       />
     </View>
   );

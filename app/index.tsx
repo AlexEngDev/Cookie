@@ -68,6 +68,7 @@ export default function GameScreen() {
   const deathCount = useGameStore((state) => state.deathCount);
   const takeDamage = useGameStore((state) => state.takeDamage);
   const heal = useGameStore((state) => state.heal);
+  const loseFood = useGameStore((state) => state.loseFood);
 
   // Animated value for interpolating the background colour between stages
   const bgColorAnim = useRef(new Animated.Value(0)).current;
@@ -228,6 +229,7 @@ export default function GameScreen() {
           onPredatorHit={handlePredatorHit}
           mutations={mutations}
           dietScore={dietScore}
+          onDashActivated={loseFood}
         />
 
         {/* Fixed HUD — always on top, touches pass through to world behind */}
