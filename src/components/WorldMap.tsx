@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
@@ -22,10 +22,23 @@ const FOOD_RESPAWN_MS = 3000;
 const FOOD_EMOJIS: string[] = ['🍖', '🌿', '🫐'];
 /** World units per animation frame the creature moves (~3 px/frame at 60 fps) */
 const CREATURE_SPEED = 3;
-/** World-unit radius within which the creature eats a food item */
+/** Base world-unit radius within which the creature eats a food item */
 const COLLISION_RADIUS = 55;
+/** Maximum food collision radius (capped so it doesn't become absurdly large) */
+const MAX_FOOD_COLLISION_RADIUS = 130;
 /** Creature stops moving once it is within this many world units of the target */
 const MOVEMENT_STOP_DIST = 2;
+
+// ─── Player size constants ────────────────────────────────────────────────────
+
+/** Player's baseline size score at zero food collected */
+const BASE_PLAYER_SIZE = 30;
+/** Size score gained per food unit collected */
+const SIZE_PER_FOOD = 0.5;
+/** Maximum player size score (caps collision growth) */
+const MAX_PLAYER_SIZE = 120;
+/** Maximum visual scale applied to the creature sprite (keeps it on screen) */
+const MAX_VISUAL_SCALE = 2.5;
 
 // ─── AI entity constants ──────────────────────────────────────────────────────
 
@@ -33,8 +46,12 @@ const MOVEMENT_STOP_DIST = 2;
 const PREY_SCARE_RADIUS = 200;
 /** Distance at which a predator starts chasing the player */
 const PREDATOR_AGGRO_RADIUS = 300;
-/** Distance for player ↔ AI collision */
+/** Base distance for player ↔ AI collision */
 const AI_COLLISION_RADIUS = 50;
+/** Maximum AI collision radius */
+const MAX_AI_COLLISION_RADIUS = 110;
+/** Fixed size score assigned to predator entities */
+const PREDATOR_SIZE = 50;
 /** Rendered size (px) of the AI emoji container */
 const AI_ENTITY_SIZE = 40;
 /** Time (ms) before eaten prey respawns */
@@ -173,12 +190,16 @@ const DOT_COUNT = Math.floor(WORLD_SIZE / DOT_SPACING);
 interface WorldMapProps {
   /** Current evolution stage index (0–3) */
   stageIndex: number;
+  /** Current food count from the game store — drives dynamic size */
+  playerFood: number;
   /** Called when a food item is collected (eaten by collision) */
   onFoodCollected: () => void;
   /** Called when the player's creature eats a prey entity */
   onPreyEaten?: () => void;
   /** Called when a predator collides with the player */
   onPredatorHit?: () => void;
+  /** Called when the player (now bigger) eats a predator */
+  onPredatorEaten?: () => void;
 }
 
 // ─── FoodSprite ──────────────────────────────────────────────────────────────
@@ -293,9 +314,11 @@ const AiSprite: React.FC<AiSpriteProps> = React.memo(
  */
 const WorldMap: React.FC<WorldMapProps> = ({
   stageIndex,
+  playerFood,
   onFoodCollected,
   onPreyEaten = () => {},
   onPredatorHit = () => {},
+  onPredatorEaten = () => {},
 }) => {
   const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -321,6 +344,31 @@ const WorldMap: React.FC<WorldMapProps> = ({
   const cameraYAnim = useRef(new Animated.Value(initCamY)).current;
   const cameraXRef = useRef(initCamX);
   const cameraYRef = useRef(initCamY);
+
+  // ── Player size (derived from playerFood, kept in a ref for the RAF loop) ──
+
+  /**
+   * Computed player size score: grows with food collected.
+   * Used for collision radius scaling and the predator/prey size hierarchy.
+   */
+  const getPlayerSize = (food: number) =>
+    Math.min(MAX_PLAYER_SIZE, BASE_PLAYER_SIZE + food * SIZE_PER_FOOD);
+
+  /** Ref read by the RAF loop to avoid stale closure over playerFood */
+  const playerSizeRef = useRef(getPlayerSize(playerFood));
+  useEffect(() => {
+    playerSizeRef.current = getPlayerSize(playerFood);
+  // getPlayerSize is a pure function; playerFood is the only true dependency
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerFood]);
+
+  /** Visual scale applied to the creature sprite — capped to keep it on-screen */
+  const visualScale = useMemo(
+    () => Math.min(MAX_VISUAL_SCALE, getPlayerSize(playerFood) / BASE_PLAYER_SIZE),
+    // getPlayerSize is a pure module-level function; playerFood is the only dep
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [playerFood],
+  );
 
   // ── Food state ──────────────────────────────────────────────────────────────
 
@@ -438,6 +486,12 @@ const WorldMap: React.FC<WorldMapProps> = ({
    */
   const respawningPreyRef = useRef(new Set<number>());
 
+  /**
+   * Indices of predators currently mid-respawn (eaten by the player).
+   * Prevents duplicate collision triggers while the entity is transitioning.
+   */
+  const respawningPredatorRef = useRef(new Set<number>());
+
   /** Stable refs for callbacks so the RAF loop always calls the latest version */
   const onPreyEatenRef = useRef(onPreyEaten);
   useEffect(() => {
@@ -449,9 +503,60 @@ const WorldMap: React.FC<WorldMapProps> = ({
     onPredatorHitRef.current = onPredatorHit;
   }, [onPredatorHit]);
 
+  const onPredatorEatenRef = useRef(onPredatorEaten);
+  useEffect(() => {
+    onPredatorEatenRef.current = onPredatorEaten;
+  }, [onPredatorEaten]);
+
   // ── requestAnimationFrame movement loop ─────────────────────────────────────
 
   const rafRef = useRef<number | null>(null);
+
+  /**
+   * Shared helper: immediately despawn an AI entity, fire its "eaten" callback,
+   * then respawn it at a random position after PREY_RESPAWN_MS milliseconds.
+   * Used for both prey and predator entities that the player eats.
+   */
+  const despawnAndRespawn = useCallback(
+    (
+      index: number,
+      trackingSet: React.MutableRefObject<Set<number>>,
+      onEaten: React.MutableRefObject<() => void>,
+    ) => {
+      const entity = aiRefs.current[index];
+      entity.alive = false;
+      trackingSet.current.add(index);
+      setAiAliveState((prev) => prev.map((v, idx) => (idx === index ? false : v)));
+      onEaten.current();
+
+      setTimeout(() => {
+        const spawnX = AI_MARGIN + Math.random() * (WORLD_SIZE - AI_MARGIN * 2);
+        const spawnY = AI_MARGIN + Math.random() * (WORLD_SIZE - AI_MARGIN * 2);
+        const angle = Math.random() * Math.PI * 2;
+        entity.worldX = spawnX;
+        entity.worldY = spawnY;
+        entity.dirX = Math.cos(angle);
+        entity.dirY = Math.sin(angle);
+        entity.alive = true;
+        aiAnims[index].xAnim.setValue(spawnX);
+        aiAnims[index].yAnim.setValue(spawnY);
+        trackingSet.current.delete(index);
+        setAiAliveState((prev) => prev.map((v, idx) => (idx === index ? true : v)));
+      }, PREY_RESPAWN_MS);
+    },
+    // Dependencies are all guaranteed stable:
+    //   aiRefs   — created with useRef, identity never changes
+    //   aiAnims  — created once via useRef(...).current, array is never recreated
+    //   setAiAliveState — React guarantees state-setter identity is stable
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  /** Stable ref so the RAF loop always calls the latest despawnAndRespawn */
+  const despawnAndRespawnRef = useRef(despawnAndRespawn);
+  useEffect(() => {
+    despawnAndRespawnRef.current = despawnAndRespawn;
+  }, [despawnAndRespawn]);
 
   useEffect(() => {
     // All mutable world-state is accessed via refs inside this loop, so the
@@ -464,6 +569,12 @@ const WorldMap: React.FC<WorldMapProps> = ({
       const dx = targetXRef.current - cx;
       const dy = targetYRef.current - cy;
       const dist = Math.sqrt(dx * dx + dy * dy);
+
+      // ── Dynamic radii based on current player size ────────────────────────
+      const pSize = playerSizeRef.current;
+      const sizeRatio = pSize / BASE_PLAYER_SIZE;
+      const dynFoodRadius = Math.min(MAX_FOOD_COLLISION_RADIUS, COLLISION_RADIUS * sizeRatio);
+      const dynAiRadius = Math.min(MAX_AI_COLLISION_RADIUS, AI_COLLISION_RADIUS * sizeRatio);
 
       if (dist > MOVEMENT_STOP_DIST) {
         // Advance toward the target (cap at remaining distance to avoid overshoot)
@@ -501,7 +612,7 @@ const WorldMap: React.FC<WorldMapProps> = ({
           if (food.collected || collectingIdsRef.current.has(food.id)) continue;
           const fdx = food.worldX - newX;
           const fdy = food.worldY - newY;
-          if (fdx * fdx + fdy * fdy < COLLISION_RADIUS * COLLISION_RADIUS) {
+          if (fdx * fdx + fdy * fdy < dynFoodRadius * dynFoodRadius) {
             handleCollectFoodRef.current(food.id);
           }
         }
@@ -510,6 +621,7 @@ const WorldMap: React.FC<WorldMapProps> = ({
       // ── AI entity update (runs every frame regardless of player movement) ──
       const playerX = creatureXRef.current;
       const playerY = creatureYRef.current;
+      const playerBiggerThanPredator = playerSizeRef.current > PREDATOR_SIZE;
 
       for (let i = 0; i < aiRefs.current.length; i++) {
         const entity = aiRefs.current[i];
@@ -533,11 +645,17 @@ const WorldMap: React.FC<WorldMapProps> = ({
             entity.dirY = Math.sin(angle);
           }
         } else {
-          // Predator
+          // Predator: behaviour flips based on size hierarchy
           if (pDist < PREDATOR_AGGRO_RADIUS && pDist > 0) {
-            // Chase: head straight toward the player
-            entity.dirX = pdx / pDist;
-            entity.dirY = pdy / pDist;
+            if (playerBiggerThanPredator) {
+              // Player is now bigger — predator flees!
+              entity.dirX = -pdx / pDist;
+              entity.dirY = -pdy / pDist;
+            } else {
+              // Normal: predator chases the player
+              entity.dirX = pdx / pDist;
+              entity.dirY = pdy / pDist;
+            }
           } else if (Math.random() < WANDER_CHANGE_CHANCE) {
             const angle = Math.random() * Math.PI * 2;
             entity.dirX = Math.cos(angle);
@@ -573,50 +691,37 @@ const WorldMap: React.FC<WorldMapProps> = ({
         aiAnims[i].yAnim.setValue(nextY);
 
         // ── Collision: AI ↔ player ──────────────────────────────────────────
-        if (pDistSq < AI_COLLISION_RADIUS * AI_COLLISION_RADIUS) {
+        if (pDistSq < dynAiRadius * dynAiRadius) {
           if (config.type === 'prey' && !respawningPreyRef.current.has(i)) {
             // Prey eaten by player: despawn, award food, respawn after delay
-            entity.alive = false;
-            respawningPreyRef.current.add(i);
-            setAiAliveState((prev) => prev.map((v, idx) => (idx === i ? false : v)));
-            onPreyEatenRef.current();
-
-            setTimeout(() => {
-              const spawnX = AI_MARGIN + Math.random() * (WORLD_SIZE - AI_MARGIN * 2);
-              const spawnY = AI_MARGIN + Math.random() * (WORLD_SIZE - AI_MARGIN * 2);
-              const angle = Math.random() * Math.PI * 2;
-              entity.worldX = spawnX;
-              entity.worldY = spawnY;
-              entity.dirX = Math.cos(angle);
-              entity.dirY = Math.sin(angle);
-              entity.alive = true;
-              aiAnims[i].xAnim.setValue(spawnX);
-              aiAnims[i].yAnim.setValue(spawnY);
-              respawningPreyRef.current.delete(i);
-              setAiAliveState((prev) => prev.map((v, idx) => (idx === i ? true : v)));
-            }, PREY_RESPAWN_MS);
-          } else if (config.type === 'predator' && !invulRef.current) {
-            // Predator hits player: deduct food and flash creature for 1.5 s
-            invulRef.current = true;
-            onPredatorHitRef.current();
-            Animated.loop(
-              Animated.sequence([
-                Animated.timing(invulOpacity, {
-                  toValue: 0.25,
-                  duration: INVUL_FLASH_HALF_DURATION,
-                  useNativeDriver: true,
-                }),
-                Animated.timing(invulOpacity, {
-                  toValue: 1,
-                  duration: INVUL_FLASH_HALF_DURATION,
-                  useNativeDriver: true,
-                }),
-              ]),
-              { iterations: INVUL_FLASH_COUNT },
-            ).start(() => {
-              invulOpacity.setValue(1);
-              invulRef.current = false;
-            });
+            despawnAndRespawnRef.current(i, respawningPreyRef, onPreyEatenRef);
+          } else if (config.type === 'predator') {
+            if (playerBiggerThanPredator && !respawningPredatorRef.current.has(i)) {
+              // Player is bigger: eat the predator, award bonus food, respawn it
+              despawnAndRespawnRef.current(i, respawningPredatorRef, onPredatorEatenRef);
+            } else if (!playerBiggerThanPredator && !invulRef.current) {
+              // Player is smaller: predator damages the player
+              invulRef.current = true;
+              onPredatorHitRef.current();
+              Animated.loop(
+                Animated.sequence([
+                  Animated.timing(invulOpacity, {
+                    toValue: 0.25,
+                    duration: INVUL_FLASH_HALF_DURATION,
+                    useNativeDriver: true,
+                  }),
+                  Animated.timing(invulOpacity, {
+                    toValue: 1,
+                    duration: INVUL_FLASH_HALF_DURATION,
+                    useNativeDriver: true,
+                  }),
+                ]),
+                { iterations: INVUL_FLASH_COUNT },
+              ).start(() => {
+                invulOpacity.setValue(1);
+                invulRef.current = false;
+              });
+            }
           }
         }
       }
@@ -748,7 +853,7 @@ const WorldMap: React.FC<WorldMapProps> = ({
               left: creatureLeft,
               top: creatureTop,
               opacity: invulOpacity,
-              transform: [{ rotate: creatureRotate }],
+              transform: [{ rotate: creatureRotate }, { scale: visualScale }],
             },
           ]}
         >

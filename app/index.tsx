@@ -109,6 +109,12 @@ export default function GameScreen() {
     addPassiveFood(stage.clickPower * 5);
   }, [tapFeedback, addPassiveFood, stage.clickPower]);
 
+  /** Player (now bigger) eats a predator — award a large food bonus */
+  const handlePredatorEaten = useCallback(() => {
+    tapFeedback();
+    addPassiveFood(20);
+  }, [tapFeedback, addPassiveFood]);
+
   /** A predator hits the player — deduct food and trigger haptic feedback */
   const handlePredatorHit = useCallback(() => {
     tapFeedback();
@@ -140,8 +146,10 @@ export default function GameScreen() {
         {/* 2D World — creature moves toward touch, fills the full screen */}
         <WorldMap
           stageIndex={currentStage}
+          playerFood={food}
           onFoodCollected={handleFoodCollected}
           onPreyEaten={handlePreyEaten}
+          onPredatorEaten={handlePredatorEaten}
           onPredatorHit={handlePredatorHit}
         />
 
