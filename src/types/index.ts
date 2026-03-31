@@ -52,6 +52,16 @@ export interface Upgrade {
   effectValue: number;
 }
 
+/** Mutation levels for the creature editor */
+export interface Mutations {
+  /** Flagella/Fins — increases movement speed */
+  speedLevel: number;
+  /** Spikes — reduces food lost when hit by a predator */
+  spikesLevel: number;
+  /** Jaws — increases food collection radius and bonus food per item */
+  jawsLevel: number;
+}
+
 /** Game state */
 export interface GameState {
   /** Current food amount */
@@ -70,6 +80,8 @@ export interface GameState {
   unlockedAchievements: string[];
   /** Whether haptic feedback is enabled (toggled by the mute button) */
   hapticsEnabled: boolean;
+  /** Purchased mutation levels (creature editor) */
+  mutations: Mutations;
 }
 
 /** Game store actions */
@@ -92,6 +104,11 @@ export interface GameActions {
   toggleHaptics: () => void;
   /** Deduct food when hit by a predator (food cannot go below 0) */
   loseFood: (amount: number) => void;
+  /**
+   * Purchase one level of a mutation.
+   * Deducts `cost` from food and increments the respective mutation level.
+   */
+  buyMutation: (type: 'speed' | 'spikes' | 'jaws', cost: number) => void;
 }
 
 /** Full store type (state + actions) */

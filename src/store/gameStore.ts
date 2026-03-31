@@ -18,6 +18,7 @@ const initialState: GameState = {
   upgrades: {},
   unlockedAchievements: [],
   hapticsEnabled: true,
+  mutations: { speedLevel: 0, spikesLevel: 0, jawsLevel: 0 },
 };
 
 /** Persist the game state to AsyncStorage */
@@ -244,6 +245,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
     saveState({ ...get(), ...newState });
   },
 
+  /** Purchase one level of a mutation if the player can afford it */
+  buyMutation: (type: 'speed' | 'spikes' | 'jaws', cost: number) => {
+    const MAX_MUTATION_LEVEL = 5;
+    const { food, mutations } = get();
+    if (food < cost) return;
+    const key = `${type}Level` as keyof typeof mutations;
+    if (mutations[key] >= MAX_MUTATION_LEVEL) return;
+    const newMutations = { ...mutations, [key]: mutations[key] + 1 };
+    const newState = { food: food - cost, mutations: newMutations };
+    set(newState);
+    saveState({ ...get(), ...newState });
+  },
+
   /** Load previously saved game state from AsyncStorage */
   loadSavedState: async () => {
     try {
@@ -256,6 +270,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         if (!parsed.unlockedAchievements) parsed.unlockedAchievements = [];
         // Ensure hapticsEnabled exists for older saves (default: true)
         if (parsed.hapticsEnabled === undefined) parsed.hapticsEnabled = true;
+        // Ensure mutations field exists for saves created before mutation shop
+        if (!parsed.mutations) parsed.mutations = { speedLevel: 0, spikesLevel: 0, jawsLevel: 0 };
         set(parsed);
       }
     } catch (e) {
