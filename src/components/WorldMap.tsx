@@ -192,8 +192,8 @@ interface WorldMapProps {
   stageIndex: number;
   /** Current food count from the game store — drives dynamic size */
   playerFood: number;
-  /** Called when a food item is collected (eaten by collision) */
-  onFoodCollected: () => void;
+  /** Called when a food item is collected (eaten by collision) — receives the food emoji */
+  onFoodCollected: (emoji: string) => void;
   /** Called when the player's creature eats a prey entity */
   onPreyEaten?: () => void;
   /** Called when a predator collides with the player */
@@ -202,6 +202,8 @@ interface WorldMapProps {
   onPredatorEaten?: () => void;
   /** Current mutation levels — affects speed, food radius, and visuals */
   mutations?: { speedLevel: number; spikesLevel: number; jawsLevel: number };
+  /** Current diet score (-100 = herbivore, 0 = omnivore, +100 = carnivore) */
+  dietScore?: number;
 }
 
 // ─── FoodSprite ──────────────────────────────────────────────────────────────
@@ -324,6 +326,7 @@ const WorldMap: React.FC<WorldMapProps> = ({
   onPredatorHit = () => {},
   onPredatorEaten = () => {},
   mutations,
+  dietScore = 0,
 }) => {
   const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -406,6 +409,12 @@ const WorldMap: React.FC<WorldMapProps> = ({
     jawsLevelRef.current = mutations?.jawsLevel ?? 0;
   }, [mutations?.jawsLevel]);
 
+  /** Diet score ref — read every frame to apply herbivore/carnivore bonuses */
+  const dietScoreRef = useRef(dietScore);
+  useEffect(() => {
+    dietScoreRef.current = dietScore;
+  }, [dietScore]);
+
   // ── Biome data for current stage ────────────────────────────────────────────
 
   const currentStageData = STAGES[stageIndex] ?? STAGES[0];
@@ -460,10 +469,14 @@ const WorldMap: React.FC<WorldMapProps> = ({
       if (collectingIdsRef.current.has(id)) return;
       collectingIdsRef.current.add(id);
 
+      // Find the emoji before marking collected, so we can pass it to the callback
+      const item = foodItemsRef.current.find((f) => f.id === id);
+      const collectedEmoji = item?.emoji ?? '';
+
       setFoodItems((prev) =>
         prev.map((item) => (item.id === id ? { ...item, collected: true } : item)),
       );
-      onFoodCollected();
+      onFoodCollected(collectedEmoji);
 
       setTimeout(() => {
         setFoodItems((prev) => {
@@ -689,11 +702,17 @@ const WorldMap: React.FC<WorldMapProps> = ({
       // Jaws mutation expands food collection radius (each level adds 20%)
       const jawsRadiusBonus = 1 + jawsLevelRef.current * 0.2;
       const dynFoodRadius = Math.min(MAX_FOOD_COLLISION_RADIUS, COLLISION_RADIUS * sizeRatio * jawsRadiusBonus);
-      const dynAiRadius = Math.min(MAX_AI_COLLISION_RADIUS, AI_COLLISION_RADIUS * sizeRatio);
+      // Carnivore diet bonus: +10% AI collision radius when score > 30
+      const carnivoreBonus = dietScoreRef.current > 30 ? 1.1 : 1;
+      const dynAiRadius = Math.min(MAX_AI_COLLISION_RADIUS, AI_COLLISION_RADIUS * sizeRatio * carnivoreBonus);
 
       if (dist > MOVEMENT_STOP_DIST) {
         // Speed mutation multiplies base movement speed (each level adds 25%)
-        const effectiveSpeed = CREATURE_SPEED * (1 + speedLevelRef.current * 0.25);
+        let effectiveSpeed = CREATURE_SPEED * (1 + speedLevelRef.current * 0.25);
+        // Herbivore diet bonus: +17% speed when score < -30
+        if (dietScoreRef.current < -30) {
+          effectiveSpeed *= 1.17;
+        }
         // Advance toward the target (cap at remaining distance to avoid overshoot)
         const step = Math.min(effectiveSpeed, dist);
         const nx = dx / dist;

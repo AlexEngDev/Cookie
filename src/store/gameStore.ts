@@ -19,6 +19,7 @@ const initialState: GameState = {
   unlockedAchievements: [],
   hapticsEnabled: true,
   mutations: { speedLevel: 0, spikesLevel: 0, jawsLevel: 0 },
+  dietScore: 0,
 };
 
 /** Persist the game state to AsyncStorage */
@@ -258,6 +259,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
     saveState({ ...get(), ...newState });
   },
 
+  /** Record that the player ate a plant or meat item, shifting the diet score */
+  eatFoodType: (type: 'plant' | 'meat') => {
+    const { dietScore } = get();
+    const delta = type === 'plant' ? -5 : 5;
+    const newScore = Math.max(-100, Math.min(100, dietScore + delta));
+    const newState = { dietScore: newScore };
+    set(newState);
+    saveState({ ...get(), ...newState });
+  },
+
   /** Load previously saved game state from AsyncStorage */
   loadSavedState: async () => {
     try {
@@ -272,6 +283,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         if (parsed.hapticsEnabled === undefined) parsed.hapticsEnabled = true;
         // Ensure mutations field exists for saves created before mutation shop
         if (!parsed.mutations) parsed.mutations = { speedLevel: 0, spikesLevel: 0, jawsLevel: 0 };
+        // Ensure dietScore exists for saves created before the diet system
+        if (parsed.dietScore === undefined) parsed.dietScore = 0;
         set(parsed);
       }
     } catch (e) {
