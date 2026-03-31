@@ -39,6 +39,8 @@ export default function GameScreen() {
   const currentStage = useGameStore((state) => state.currentStage);
   const clickCount = useGameStore((state) => state.clickCount);
   const clickFood = useGameStore((state) => state.clickFood);
+  const addPassiveFood = useGameStore((state) => state.addPassiveFood);
+  const loseFood = useGameStore((state) => state.loseFood);
   const evolve = useGameStore((state) => state.evolve);
   const reset = useGameStore((state) => state.reset);
   const loadSavedState = useGameStore((state) => state.loadSavedState);
@@ -100,6 +102,19 @@ export default function GameScreen() {
     clickFood();
   }, [tapFeedback, clickFood]);
 
+  /** Player eats a prey creature — award bonus food and trigger haptic feedback */
+  const handlePreyEaten = useCallback(() => {
+    tapFeedback();
+    // Prey gives 5× the stage's base click power (always more than a food item)
+    addPassiveFood(stage.clickPower * 5);
+  }, [tapFeedback, addPassiveFood, stage.clickPower]);
+
+  /** A predator hits the player — deduct food and trigger haptic feedback */
+  const handlePredatorHit = useCallback(() => {
+    tapFeedback();
+    loseFood(10);
+  }, [tapFeedback, loseFood]);
+
   /** Evolve to the next stage and trigger haptic feedback */
   const handleEvolve = () => {
     evolveFeedback();
@@ -126,6 +141,8 @@ export default function GameScreen() {
         <WorldMap
           stageIndex={currentStage}
           onFoodCollected={handleFoodCollected}
+          onPreyEaten={handlePreyEaten}
+          onPredatorHit={handlePredatorHit}
         />
 
         {/* Fixed HUD — always on top, touches pass through to world behind */}

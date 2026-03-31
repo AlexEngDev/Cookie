@@ -90,6 +90,8 @@ export interface GameActions {
   loadSavedState: () => Promise<void>;
   /** Toggle haptic feedback on or off */
   toggleHaptics: () => void;
+  /** Deduct food when hit by a predator (food cannot go below 0) */
+  loseFood: (amount: number) => void;
 }
 
 /** Full store type (state + actions) */
