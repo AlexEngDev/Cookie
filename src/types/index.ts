@@ -90,6 +90,11 @@ export interface GameState {
   hapticsEnabled: boolean;
   /** Purchased mutation levels (creature editor) */
   mutations: Mutations;
+  /**
+   * Diet score: -100 = pure herbivore, 0 = omnivore, +100 = pure carnivore.
+   * Decreases when eating plants, increases when eating meat/prey.
+   */
+  dietScore: number;
 }
 
 /** Game store actions */
@@ -117,6 +122,12 @@ export interface GameActions {
    * Deducts `cost` from food and increments the respective mutation level.
    */
   buyMutation: (type: 'speed' | 'spikes' | 'jaws', cost: number) => void;
+  /**
+   * Record that the player ate a food item of the given type.
+   * 'plant' shifts the diet toward Herbivore (-5), 'meat' toward Carnivore (+5).
+   * Score is capped at [-100, 100].
+   */
+  eatFoodType: (type: 'plant' | 'meat') => void;
 }
 
 /** Full store type (state + actions) */

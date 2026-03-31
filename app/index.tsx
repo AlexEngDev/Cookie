@@ -20,6 +20,19 @@ import ResourcePanel from '../src/components/ResourcePanel';
 import EvolveButton from '../src/components/EvolveButton';
 import ParticleSystem, { ParticleSystemRef } from '../src/components/ParticleSystem';
 import WorldMap from '../src/components/WorldMap';
+import DietBar from '../src/components/DietBar';
+
+// ─── Diet food categorisation ─────────────────────────────────────────────────
+
+/** Emojis that count as plant-based food → shift diet toward Herbivore */
+const PLANT_EMOJIS = new Set([
+  '🌿', '🫐', '🍎', '🍄', '🥕', '🍞', '🪸', '🐚',
+]);
+
+/** Emojis that count as meat food → shift diet toward Carnivore */
+const MEAT_EMOJIS = new Set([
+  '🍖', '🥩', '🍗',
+]);
 
 /**
  * Main game screen for Cookie Evolution.
@@ -48,6 +61,8 @@ export default function GameScreen() {
   const toggleHaptics = useGameStore((state) => state.toggleHaptics);
   const unlockedAchievements = useGameStore((state) => state.unlockedAchievements);
   const mutations = useGameStore((state) => state.mutations);
+  const dietScore = useGameStore((state) => state.dietScore);
+  const eatFoodType = useGameStore((state) => state.eatFoodType);
 
   // Animated value for interpolating the background colour between stages
   const bgColorAnim = useRef(new Animated.Value(0)).current;
@@ -98,27 +113,36 @@ export default function GameScreen() {
   });
 
   /** Collect a food item from the world — award food and trigger haptic feedback */
-  const handleFoodCollected = useCallback(() => {
+  const handleFoodCollected = useCallback((emoji: string) => {
     tapFeedback();
     clickFood();
     // Jaws mutation bonus: extra food per collected item
     if (mutations.jawsLevel > 0) {
       addPassiveFood(mutations.jawsLevel * 2);
     }
-  }, [tapFeedback, clickFood, addPassiveFood, mutations.jawsLevel]);
+    // Diet tracking: plants shift toward herbivore, meat toward carnivore
+    if (PLANT_EMOJIS.has(emoji)) {
+      eatFoodType('plant');
+    } else if (MEAT_EMOJIS.has(emoji)) {
+      eatFoodType('meat');
+    }
+  }, [tapFeedback, clickFood, addPassiveFood, mutations.jawsLevel, eatFoodType]);
 
   /** Player eats a prey creature — award bonus food and trigger haptic feedback */
   const handlePreyEaten = useCallback(() => {
     tapFeedback();
-    // Prey gives 5× the stage's base click power (always more than a food item)
-    addPassiveFood(stage.clickPower * 5);
-  }, [tapFeedback, addPassiveFood, stage.clickPower]);
+    // Carnivore diet bonus: +50% prey food when score > 30
+    const carnivoreMultiplier = dietScore > 30 ? 1.5 : 1;
+    addPassiveFood(stage.clickPower * 5 * carnivoreMultiplier);
+    eatFoodType('meat');
+  }, [tapFeedback, addPassiveFood, stage.clickPower, dietScore, eatFoodType]);
 
   /** Player (now bigger) eats a predator — award a large food bonus */
   const handlePredatorEaten = useCallback(() => {
     tapFeedback();
     addPassiveFood(20);
-  }, [tapFeedback, addPassiveFood]);
+    eatFoodType('meat');
+  }, [tapFeedback, addPassiveFood, eatFoodType]);
 
   /** A predator hits the player — deduct food and trigger haptic feedback.
    *  Spikes mutation reduces food lost (2 per level, min 0). */
@@ -159,6 +183,7 @@ export default function GameScreen() {
           onPredatorEaten={handlePredatorEaten}
           onPredatorHit={handlePredatorHit}
           mutations={mutations}
+          dietScore={dietScore}
         />
 
         {/* Fixed HUD — always on top, touches pass through to world behind */}
@@ -203,6 +228,9 @@ export default function GameScreen() {
             passiveIncome={stage.passiveIncome}
             clickCount={clickCount}
           />
+
+          {/* Diet scale: shows Herbivore ↔ Omnivore ↔ Carnivore balance */}
+          <DietBar dietScore={dietScore} />
 
           {/* Spacer — keeps the bottom HUD pinned to the bottom */}
           <View style={styles.flex1} pointerEvents="none" />
