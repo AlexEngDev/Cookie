@@ -4,14 +4,8 @@ import {
   Dimensions,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
-import {
-  GestureEvent,
-  PanGestureHandler,
-  PanGestureHandlerEventPayload,
-} from 'react-native-gesture-handler';
 import { STAGES } from '../../src/constants/stages';
 import Creature from './Creature';
 
@@ -19,12 +13,19 @@ import Creature from './Creature';
 
 const WORLD_SIZE = 1200;
 const CREATURE_SIZE = 200;
-const CREATURE_WORLD_X = 600;
-const CREATURE_WORLD_Y = 600;
+/** Starting world position (centre of the map) */
+const CREATURE_START_X = WORLD_SIZE / 2;
+const CREATURE_START_Y = WORLD_SIZE / 2;
 const FOOD_COUNT = 8;
 const FOOD_ITEM_SIZE = 40;
 const FOOD_RESPAWN_MS = 3000;
 const FOOD_EMOJIS: string[] = ['🍖', '🌿', '🫐'];
+/** World units per animation frame the creature moves (~3 px/frame at 60 fps) */
+const CREATURE_SPEED = 3;
+/** World-unit radius within which the creature eats a food item */
+const COLLISION_RADIUS = 55;
+/** Creature stops moving once it is within this many world units of the target */
+const MOVEMENT_STOP_DIST = 2;
 
 // ─── Decoration seeds (static, deterministic) ─────────────────────────────────
 
@@ -44,7 +45,7 @@ interface Decoration {
   emoji: string;
 }
 
-/** Generate decorations once, keeping them well away from the creature. */
+/** Generate decorations once, keeping them well away from the creature start. */
 function buildDecorations(): Decoration[] {
   const rand = seededRand(42);
   const decorations: Decoration[] = [];
@@ -64,8 +65,8 @@ function buildDecorations(): Decoration[] {
         x = margin + rand() * (WORLD_SIZE - margin * 2);
         y = margin + rand() * (WORLD_SIZE - margin * 2);
       } while (
-        Math.abs(x - CREATURE_WORLD_X) < avoidCenterRadius &&
-        Math.abs(y - CREATURE_WORLD_Y) < avoidCenterRadius
+        Math.abs(x - CREATURE_START_X) < avoidCenterRadius &&
+        Math.abs(y - CREATURE_START_Y) < avoidCenterRadius
       );
       decorations.push({ id: `${prefix}_${i}`, worldX: x, worldY: y, emoji });
     }
@@ -110,11 +111,7 @@ const DOT_COUNT = Math.floor(WORLD_SIZE / DOT_SPACING);
 interface WorldMapProps {
   /** Current evolution stage index (0–3) */
   stageIndex: number;
-  /** Called when the creature is tapped */
-  onCreatureTap: () => void;
-  /** Called with screen-absolute coordinates on creature press start */
-  onCreatureTapCoordinates: (x: number, y: number) => void;
-  /** Called when a food item is collected */
+  /** Called when a food item is collected (eaten by collision) */
   onFoodCollected: () => void;
 }
 
@@ -122,17 +119,17 @@ interface WorldMapProps {
 
 interface FoodSpriteProps {
   item: FoodItem;
-  onCollect: (id: string) => void;
   cameraX: Animated.Value;
   cameraY: Animated.Value;
 }
 
 /**
  * A single animated food sprite that lives at its world position.
- * It pops in with a bounce scale animation, and disappears when collected.
+ * It pops in with a bounce scale animation and disappears when collected.
+ * Collection now happens via creature collision, not tap.
  */
 const FoodSprite: React.FC<FoodSpriteProps> = React.memo(
-  ({ item, onCollect, cameraX, cameraY }) => {
+  ({ item, cameraX, cameraY }) => {
     const spawnScale = useRef(new Animated.Value(0)).current;
     // Track the previous collected state to detect respawn events
     const prevCollected = useRef(true);
@@ -167,14 +164,9 @@ const FoodSprite: React.FC<FoodSpriteProps> = React.memo(
             transform: [{ scale: spawnScale }],
           },
         ]}
+        pointerEvents="none"
       >
-        <TouchableOpacity
-          onPress={() => onCollect(item.id)}
-          activeOpacity={0.7}
-          style={styles.foodTouchable}
-        >
-          <Text style={styles.foodEmoji}>{item.emoji}</Text>
-        </TouchableOpacity>
+        <Text style={styles.foodEmoji}>{item.emoji}</Text>
       </Animated.View>
     );
   },
@@ -183,85 +175,64 @@ const FoodSprite: React.FC<FoodSpriteProps> = React.memo(
 // ─── WorldMap ─────────────────────────────────────────────────────────────────
 
 /**
- * 2D pan-able game world canvas.
+ * 2D game world canvas with Spore-like cell-stage movement.
  *
- * The world is 1200×1200 logical units. A PanGestureHandler lets the player
- * drag to move the camera, which is stored as an Animated.ValueXY. All world
- * objects (food, decorations, creature) are positioned absolutely relative to
- * the screen by subtracting the camera offset from their world coordinates.
+ * The world is 1200×1200 logical units. Touching anywhere on the screen sets a
+ * movement target; the creature smoothly moves toward that point via a
+ * requestAnimationFrame loop. The camera always follows the creature.
+ * Food items are eaten automatically when the creature gets close enough.
  */
 const WorldMap: React.FC<WorldMapProps> = ({
   stageIndex,
-  onCreatureTap,
-  onCreatureTapCoordinates,
   onFoodCollected,
 }) => {
   const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
-  // ── Camera state ────────────────────────────────────────────────────────────
+  // ── Creature world position (Animated for rendering, refs for RAF loop) ────
 
-  // Initial camera: center the creature on screen
-  const initialCameraX = CREATURE_WORLD_X - screenWidth / 2 + CREATURE_SIZE / 2;
-  const initialCameraY = CREATURE_WORLD_Y - screenHeight / 2 + CREATURE_SIZE / 2;
+  const creatureXAnim = useRef(new Animated.Value(CREATURE_START_X)).current;
+  const creatureYAnim = useRef(new Animated.Value(CREATURE_START_Y)).current;
+  /** Rotation angle in degrees (0 = facing right, matches SVG default) */
+  const creatureRotAnim = useRef(new Animated.Value(0)).current;
 
-  // Max offsets to clamp the camera inside the world
-  const maxCameraX = WORLD_SIZE - screenWidth;
-  const maxCameraY = WORLD_SIZE - screenHeight;
+  const creatureXRef = useRef(CREATURE_START_X);
+  const creatureYRef = useRef(CREATURE_START_Y);
+  /** World-coordinate movement target (updated on every touch event) */
+  const targetXRef = useRef(CREATURE_START_X);
+  const targetYRef = useRef(CREATURE_START_Y);
 
-  const cameraX = useRef(new Animated.Value(initialCameraX)).current;
-  const cameraY = useRef(new Animated.Value(initialCameraY)).current;
+  // ── Camera (clamped to world bounds, always centred on creature) ───────────
 
-  // JS-side camera values (needed for clamping during pan)
-  const cameraXRef = useRef(initialCameraX);
-  const cameraYRef = useRef(initialCameraY);
+  const initCamX = Math.max(0, Math.min(WORLD_SIZE - screenWidth, CREATURE_START_X - screenWidth / 2));
+  const initCamY = Math.max(0, Math.min(WORLD_SIZE - screenHeight, CREATURE_START_Y - screenHeight / 2));
 
-  // Track the camera position at the start of each pan gesture
-  const panStartX = useRef(initialCameraX);
-  const panStartY = useRef(initialCameraY);
-
-  // Keep JS refs in sync with Animated values
-  useEffect(() => {
-    const listenerX = cameraX.addListener(({ value }) => {
-      cameraXRef.current = value;
-    });
-    const listenerY = cameraY.addListener(({ value }) => {
-      cameraYRef.current = value;
-    });
-    return () => {
-      cameraX.removeListener(listenerX);
-      cameraY.removeListener(listenerY);
-    };
-  }, [cameraX, cameraY]);
-
-  // ── Pan gesture ─────────────────────────────────────────────────────────────
-
-  const onGestureEvent = useCallback(
-    (event: GestureEvent<PanGestureHandlerEventPayload>) => {
-      const { translationX, translationY } = event.nativeEvent;
-      // Subtract translation because dragging right moves the camera left
-      const rawX = panStartX.current - translationX;
-      const rawY = panStartY.current - translationY;
-      const clampedX = Math.max(0, Math.min(maxCameraX, rawX));
-      const clampedY = Math.max(0, Math.min(maxCameraY, rawY));
-      cameraX.setValue(clampedX);
-      cameraY.setValue(clampedY);
-    },
-    [cameraX, cameraY, maxCameraX, maxCameraY],
-  );
-
-  const onHandlerStateChange = useCallback(() => {
-    // Snapshot the camera position at the end of each gesture so the next one starts from here
-    panStartX.current = cameraXRef.current;
-    panStartY.current = cameraYRef.current;
-  }, []);
+  const cameraXAnim = useRef(new Animated.Value(initCamX)).current;
+  const cameraYAnim = useRef(new Animated.Value(initCamY)).current;
+  const cameraXRef = useRef(initCamX);
+  const cameraYRef = useRef(initCamY);
 
   // ── Food state ──────────────────────────────────────────────────────────────
 
   const [foodItems, setFoodItems] = useState<FoodItem[]>(buildInitialFood);
 
-  /** Collect a food item, call the store action, then respawn after 3 s. */
+  /** Ref mirror of foodItems for collision detection inside the RAF loop */
+  const foodItemsRef = useRef(foodItems);
+  useEffect(() => {
+    foodItemsRef.current = foodItems;
+  }, [foodItems]);
+
+  /**
+   * IDs of food items currently being collected (prevents duplicate triggers
+   * between the state update settling and the next animation frame).
+   */
+  const collectingIdsRef = useRef(new Set<string>());
+
+  /** Collect a food item, notify the store, then respawn after 3 s. */
   const handleCollectFood = useCallback(
     (id: string) => {
+      if (collectingIdsRef.current.has(id)) return;
+      collectingIdsRef.current.add(id);
+
       setFoodItems((prev) =>
         prev.map((item) => (item.id === id ? { ...item, collected: true } : item)),
       );
@@ -293,6 +264,7 @@ const WorldMap: React.FC<WorldMapProps> = ({
           );
 
           const newEmoji = FOOD_EMOJIS[Math.floor(Math.random() * FOOD_EMOJIS.length)];
+          collectingIdsRef.current.delete(id);
           return prev.map((item) =>
             item.id === id
               ? { ...item, worldX: newX, worldY: newY, collected: false, emoji: newEmoji }
@@ -304,31 +276,122 @@ const WorldMap: React.FC<WorldMapProps> = ({
     [onFoodCollected],
   );
 
+  /** Stable ref so the RAF loop always calls the latest handleCollectFood */
+  const handleCollectFoodRef = useRef(handleCollectFood);
+  useEffect(() => {
+    handleCollectFoodRef.current = handleCollectFood;
+  }, [handleCollectFood]);
+
+  // ── requestAnimationFrame movement loop ─────────────────────────────────────
+
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    // All mutable world-state is accessed via refs inside this loop, so the
+    // only true "external" dependencies are the screen dimensions used for
+    // camera clamping. Re-creating the loop on every render would reset the
+    // animation frame ID unnecessarily, so deps are intentionally limited.
+    const loop = () => {
+      const cx = creatureXRef.current;
+      const cy = creatureYRef.current;
+      const dx = targetXRef.current - cx;
+      const dy = targetYRef.current - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist > MOVEMENT_STOP_DIST) {
+        // Advance toward the target (cap at remaining distance to avoid overshoot)
+        const step = Math.min(CREATURE_SPEED, dist);
+        const nx = dx / dist;
+        const ny = dy / dist;
+
+        const newX = Math.max(
+          CREATURE_SIZE / 2,
+          Math.min(WORLD_SIZE - CREATURE_SIZE / 2, cx + nx * step),
+        );
+        const newY = Math.max(
+          CREATURE_SIZE / 2,
+          Math.min(WORLD_SIZE - CREATURE_SIZE / 2, cy + ny * step),
+        );
+
+        creatureXRef.current = newX;
+        creatureYRef.current = newY;
+
+        // Sync Animated values (JS thread – setValue is synchronous)
+        creatureXAnim.setValue(newX);
+        creatureYAnim.setValue(newY);
+        creatureRotAnim.setValue(Math.atan2(dy, dx) * (180 / Math.PI));
+
+        // Update camera (centred on creature, clamped to world bounds)
+        const newCamX = Math.max(0, Math.min(WORLD_SIZE - screenWidth, newX - screenWidth / 2));
+        const newCamY = Math.max(0, Math.min(WORLD_SIZE - screenHeight, newY - screenHeight / 2));
+        cameraXAnim.setValue(newCamX);
+        cameraYAnim.setValue(newCamY);
+        cameraXRef.current = newCamX;
+        cameraYRef.current = newCamY;
+
+        // ── Collision detection ────────────────────────────────────────────
+        for (const food of foodItemsRef.current) {
+          if (food.collected || collectingIdsRef.current.has(food.id)) continue;
+          const fdx = food.worldX - newX;
+          const fdy = food.worldY - newY;
+          if (fdx * fdx + fdy * fdy < COLLISION_RADIUS * COLLISION_RADIUS) {
+            handleCollectFoodRef.current(food.id);
+          }
+        }
+      }
+
+      rafRef.current = requestAnimationFrame(loop);
+    };
+
+    rafRef.current = requestAnimationFrame(loop);
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screenWidth, screenHeight]);
+
+  // ── Touch → world target conversion ─────────────────────────────────────────
+
+  /** Convert a screen-space touch point to a world target for the creature.
+   *  cameraXRef/cameraYRef are read via refs deliberately to avoid stale
+   *  closure issues — they are always up-to-date since the RAF loop writes
+   *  them synchronously every frame. */
+  const setMovementTarget = useCallback((screenX: number, screenY: number) => {
+    targetXRef.current = Math.max(0, Math.min(WORLD_SIZE, screenX + cameraXRef.current));
+    targetYRef.current = Math.max(0, Math.min(WORLD_SIZE, screenY + cameraYRef.current));
+  }, []);
+
   // ── Background colour ───────────────────────────────────────────────────────
 
-  // Lighten the stage colour slightly for the world background
   const stageBgColor = STAGES[stageIndex]?.color ?? STAGES[0].color;
 
   // ── Creature screen position ────────────────────────────────────────────────
 
-  // These are Animated values for the creature's absolute screen position
   const creatureLeft = Animated.subtract(
-    CREATURE_WORLD_X - CREATURE_SIZE / 2,
-    cameraX,
+    Animated.subtract(creatureXAnim, CREATURE_SIZE / 2),
+    cameraXAnim,
   );
   const creatureTop = Animated.subtract(
-    CREATURE_WORLD_Y - CREATURE_SIZE / 2,
-    cameraY,
+    Animated.subtract(creatureYAnim, CREATURE_SIZE / 2),
+    cameraYAnim,
   );
+
+  // Rotation string interpolated from the Animated angle value
+  const creatureRotate = creatureRotAnim.interpolate({
+    inputRange: [-180, 180],
+    outputRange: ['-180deg', '180deg'],
+    extrapolate: 'clamp',
+  });
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <PanGestureHandler
-      onGestureEvent={onGestureEvent}
-      onEnded={onHandlerStateChange}
-      onCancelled={onHandlerStateChange}
-      onFailed={onHandlerStateChange}
+    <View
+      style={StyleSheet.absoluteFill}
+      onStartShouldSetResponder={() => true}
+      onMoveShouldSetResponder={() => true}
+      onResponderGrant={(e) => setMovementTarget(e.nativeEvent.locationX, e.nativeEvent.locationY)}
+      onResponderMove={(e) => setMovementTarget(e.nativeEvent.locationX, e.nativeEvent.locationY)}
     >
       <Animated.View style={StyleSheet.absoluteFill}>
         {/* ── Background world layer ──────────────────────────────────────── */}
@@ -337,8 +400,8 @@ const WorldMap: React.FC<WorldMapProps> = ({
             styles.worldBackground,
             {
               backgroundColor: lighten(stageBgColor, 0.12),
-              left: Animated.multiply(cameraX, -1),
-              top: Animated.multiply(cameraY, -1),
+              left: Animated.multiply(cameraXAnim, -1),
+              top: Animated.multiply(cameraYAnim, -1),
             },
           ]}
         >
@@ -361,8 +424,8 @@ const WorldMap: React.FC<WorldMapProps> = ({
 
         {/* ── Decorations (trees + rocks) ─────────────────────────────────── */}
         {DECORATIONS.map((dec) => {
-          const screenLeft = Animated.subtract(dec.worldX - FOOD_ITEM_SIZE / 2, cameraX);
-          const screenTop = Animated.subtract(dec.worldY - FOOD_ITEM_SIZE / 2, cameraY);
+          const screenLeft = Animated.subtract(dec.worldX - FOOD_ITEM_SIZE / 2, cameraXAnim);
+          const screenTop = Animated.subtract(dec.worldY - FOOD_ITEM_SIZE / 2, cameraYAnim);
           return (
             <Animated.View
               key={dec.id}
@@ -373,29 +436,33 @@ const WorldMap: React.FC<WorldMapProps> = ({
           );
         })}
 
-        {/* ── Food items ──────────────────────────────────────────────────── */}
+        {/* ── Food items (eaten by proximity, not tap) ─────────────────────── */}
         {foodItems.map((item) => (
           <FoodSprite
             key={item.id}
             item={item}
-            onCollect={handleCollectFood}
-            cameraX={cameraX}
-            cameraY={cameraY}
+            cameraX={cameraXAnim}
+            cameraY={cameraYAnim}
           />
         ))}
 
         {/* ── Player creature ──────────────────────────────────────────────── */}
         <Animated.View
-          style={[styles.creatureContainer, { left: creatureLeft, top: creatureTop }]}
+          style={[
+            styles.creatureContainer,
+            {
+              left: creatureLeft,
+              top: creatureTop,
+              transform: [{ rotate: creatureRotate }],
+            },
+          ]}
         >
           <Creature
             stageIndex={stageIndex}
-            onPress={onCreatureTap}
-            onPressCoordinates={onCreatureTapCoordinates}
           />
         </Animated.View>
       </Animated.View>
-    </PanGestureHandler>
+    </View>
   );
 };
 
@@ -450,12 +517,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10,
-  },
-  foodTouchable: {
-    width: FOOD_ITEM_SIZE,
-    height: FOOD_ITEM_SIZE,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   foodEmoji: {
     fontSize: 26,
