@@ -19,7 +19,6 @@ const CREATURE_START_Y = WORLD_SIZE / 2;
 const FOOD_COUNT = 8;
 const FOOD_ITEM_SIZE = 40;
 const FOOD_RESPAWN_MS = 3000;
-const FOOD_EMOJIS: string[] = ['🍖', '🌿', '🫐'];
 /** World units per animation frame the creature moves (~3 px/frame at 60 fps) */
 const CREATURE_SPEED = 3;
 /** Base world-unit radius within which the creature eats a food item */
@@ -85,8 +84,8 @@ interface Decoration {
   emoji: string;
 }
 
-/** Generate decorations once, keeping them well away from the creature start. */
-function buildDecorations(): Decoration[] {
+/** Generate decorations for a given stage biome, keeping them well away from the creature start. */
+function buildDecorations(decorationEmojis: string[]): Decoration[] {
   const rand = seededRand(42);
   const decorations: Decoration[] = [];
   const margin = 60; // keep away from world edges
@@ -112,12 +111,13 @@ function buildDecorations(): Decoration[] {
     }
   };
 
-  placeItems(6, '🌲', 'tree', 200);
-  placeItems(4, '🪨', 'rock', 150);
+  placeItems(6, decorationEmojis[0] ?? '🌲', 'deco_a', 200);
+  placeItems(4, decorationEmojis[1] ?? '🪨', 'deco_b', 150);
+  if (decorationEmojis[2]) {
+    placeItems(3, decorationEmojis[2], 'deco_c', 150);
+  }
   return decorations;
 }
-
-const DECORATIONS = buildDecorations();
 
 // ─── Food item type ───────────────────────────────────────────────────────────
 
@@ -130,14 +130,14 @@ interface FoodItem {
 }
 
 /** Generate an initial set of food items with random positions. */
-function buildInitialFood(): FoodItem[] {
+function buildInitialFood(foodEmojis: string[]): FoodItem[] {
   const rand = seededRand(99);
   return Array.from({ length: FOOD_COUNT }, (_, i) => ({
     id: `food_${i}`,
     worldX: 80 + rand() * (WORLD_SIZE - 160),
     worldY: 80 + rand() * (WORLD_SIZE - 160),
     collected: false,
-    emoji: FOOD_EMOJIS[i % FOOD_EMOJIS.length],
+    emoji: foodEmojis[i % foodEmojis.length],
   }));
 }
 
@@ -265,6 +265,8 @@ const FoodSprite: React.FC<FoodSpriteProps> = React.memo(
 
 interface AiSpriteProps {
   config: AiEntityConfig;
+  /** Dynamic emoji for the current biome stage */
+  emoji: string;
   xAnim: Animated.Value;
   yAnim: Animated.Value;
   alive: boolean;
@@ -278,7 +280,7 @@ interface AiSpriteProps {
  * The component re-renders only when `alive` changes.
  */
 const AiSprite: React.FC<AiSpriteProps> = React.memo(
-  ({ config, xAnim, yAnim, alive, cameraX, cameraY }) => {
+  ({ config, emoji, xAnim, yAnim, alive, cameraX, cameraY }) => {
     if (!alive) return null;
 
     const screenX = Animated.subtract(Animated.subtract(xAnim, AI_ENTITY_SIZE / 2), cameraX);
@@ -297,7 +299,7 @@ const AiSprite: React.FC<AiSpriteProps> = React.memo(
             config.type === 'predator' ? styles.predatorEmoji : styles.preyEmoji
           }
         >
-          {config.emoji}
+          {emoji}
         </Text>
       </Animated.View>
     );
@@ -351,26 +353,43 @@ const WorldMap: React.FC<WorldMapProps> = ({
   // ── Player size (derived from playerFood, kept in a ref for the RAF loop) ──
 
   /**
-   * Computed player size score: grows with food collected.
-   * Used for collision radius scaling and the predator/prey size hierarchy.
+   * Computed player size score: grows with food collected *since last evolution*.
+   * Passing `foodSinceEvolution` (playerFood minus the baseline) keeps the creature
+   * starting small again when entering a new biome stage.
    */
-  const getPlayerSize = (food: number) =>
-    Math.min(MAX_PLAYER_SIZE, BASE_PLAYER_SIZE + food * SIZE_PER_FOOD);
+  const getPlayerSize = (foodSinceEvolution: number) =>
+    Math.min(MAX_PLAYER_SIZE, BASE_PLAYER_SIZE + foodSinceEvolution * SIZE_PER_FOOD);
+
+  /**
+   * Food value at the time of the last evolution.
+   * The RAF loop reads this ref to compute the effective food since evolution.
+   */
+  const sizeFoodBaselineRef = useRef(0);
+
+  /**
+   * React state mirror of `sizeFoodBaselineRef.current`.
+   * Having a state value means `visualScale` reacts to the baseline reset.
+   */
+  const [sizeBaseline, setSizeBaseline] = useState(0);
 
   /** Ref read by the RAF loop to avoid stale closure over playerFood */
-  const playerSizeRef = useRef(getPlayerSize(playerFood));
+  const playerSizeRef = useRef(getPlayerSize(Math.max(0, playerFood - sizeFoodBaselineRef.current)));
   useEffect(() => {
-    playerSizeRef.current = getPlayerSize(playerFood);
-  // getPlayerSize is a pure function; playerFood is the only true dependency
+    playerSizeRef.current = getPlayerSize(Math.max(0, playerFood - sizeFoodBaselineRef.current));
+  // getPlayerSize is a pure function; playerFood and sizeFoodBaselineRef are the only deps
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playerFood]);
+  }, [playerFood, sizeBaseline]);
 
   /** Visual scale applied to the creature sprite — capped to keep it on-screen */
   const visualScale = useMemo(
-    () => Math.min(MAX_VISUAL_SCALE, getPlayerSize(playerFood) / BASE_PLAYER_SIZE),
-    // getPlayerSize is a pure module-level function; playerFood is the only dep
+    () =>
+      Math.min(
+        MAX_VISUAL_SCALE,
+        getPlayerSize(Math.max(0, playerFood - sizeBaseline)) / BASE_PLAYER_SIZE,
+      ),
+    // getPlayerSize is a pure module-level function
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [playerFood],
+    [playerFood, sizeBaseline],
   );
 
   // ── Mutation level refs (read by the RAF loop every frame) ──────────────────
@@ -387,9 +406,41 @@ const WorldMap: React.FC<WorldMapProps> = ({
     jawsLevelRef.current = mutations?.jawsLevel ?? 0;
   }, [mutations?.jawsLevel]);
 
+  // ── Biome data for current stage ────────────────────────────────────────────
+
+  const currentStageData = STAGES[stageIndex] ?? STAGES[0];
+
+  /** Ref so the RAF loop and respawn callbacks always see the latest food emojis */
+  const foodEmojisRef = useRef(currentStageData.foodEmojis);
+
   // ── Food state ──────────────────────────────────────────────────────────────
 
-  const [foodItems, setFoodItems] = useState<FoodItem[]>(buildInitialFood);
+  const [foodItems, setFoodItems] = useState<FoodItem[]>(() =>
+    buildInitialFood(currentStageData.foodEmojis),
+  );
+
+  /** Decoration items — regenerated each time the biome changes */
+  const [decorations, setDecorations] = useState<Decoration[]>(() =>
+    buildDecorations(currentStageData.decorationEmojis),
+  );
+
+  /** Per-entity emoji — one entry per AI_ENTITY_CONFIGS entry, updated on biome change */
+  const [aiEmojis, setAiEmojis] = useState<string[]>(() => {
+    const preyList = currentStageData.preyEmojis;
+    const predList = currentStageData.predatorEmojis;
+    let preyIdx = 0;
+    let predIdx = 0;
+    return AI_ENTITY_CONFIGS.map((cfg) => {
+      if (cfg.type === 'prey') {
+        const emoji = preyList[preyIdx % preyList.length];
+        preyIdx += 1;
+        return emoji;
+      }
+      const emoji = predList[predIdx % predList.length];
+      predIdx += 1;
+      return emoji;
+    });
+  });
 
   /** Ref mirror of foodItems for collision detection inside the RAF loop */
   const foodItemsRef = useRef(foodItems);
@@ -439,7 +490,7 @@ const WorldMap: React.FC<WorldMapProps> = ({
             )
           );
 
-          const newEmoji = FOOD_EMOJIS[Math.floor(Math.random() * FOOD_EMOJIS.length)];
+          const newEmoji = foodEmojisRef.current[Math.floor(Math.random() * foodEmojisRef.current.length)];
           collectingIdsRef.current.delete(id);
           return prev.map((item) =>
             item.id === id
@@ -457,6 +508,51 @@ const WorldMap: React.FC<WorldMapProps> = ({
   useEffect(() => {
     handleCollectFoodRef.current = handleCollectFood;
   }, [handleCollectFood]);
+
+  // ── Biome refresh when evolution stage changes ────────────────────────────────
+
+  /** Track the previous stageIndex to skip the effect on initial mount */
+  const prevStageIndexRef = useRef(stageIndex);
+
+  useEffect(() => {
+    if (prevStageIndexRef.current === stageIndex) return;
+    prevStageIndexRef.current = stageIndex;
+
+    const stage = STAGES[stageIndex] ?? STAGES[0];
+
+    // Update food emojis ref so respawn callbacks use the new biome
+    foodEmojisRef.current = stage.foodEmojis;
+
+    // Replace all food items with fresh biome-appropriate ones
+    setFoodItems(buildInitialFood(stage.foodEmojis));
+
+    // Rebuild decorations for the new biome
+    setDecorations(buildDecorations(stage.decorationEmojis));
+
+    // Update AI entity emojis to match the new biome
+    const preyList = stage.preyEmojis;
+    const predList = stage.predatorEmojis;
+    let preyIdx = 0;
+    let predIdx = 0;
+    setAiEmojis(
+      AI_ENTITY_CONFIGS.map((cfg) => {
+        if (cfg.type === 'prey') {
+          const emoji = preyList[preyIdx % preyList.length];
+          preyIdx += 1;
+          return emoji;
+        }
+        const emoji = predList[predIdx % predList.length];
+        predIdx += 1;
+        return emoji;
+      }),
+    );
+
+    // Reset player size baseline so the creature starts small in the new biome
+    sizeFoodBaselineRef.current = playerFood;
+    setSizeBaseline(playerFood);
+  // playerFood intentionally excluded: we only want this to run on stage change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stageIndex]);
 
   // ── AI entities ──────────────────────────────────────────────────────────────
 
@@ -830,7 +926,7 @@ const WorldMap: React.FC<WorldMapProps> = ({
         </Animated.View>
 
         {/* ── Decorations (trees + rocks) ─────────────────────────────────── */}
-        {DECORATIONS.map((dec) => {
+        {decorations.map((dec) => {
           const screenLeft = Animated.subtract(dec.worldX - FOOD_ITEM_SIZE / 2, cameraXAnim);
           const screenTop = Animated.subtract(dec.worldY - FOOD_ITEM_SIZE / 2, cameraYAnim);
           return (
@@ -858,6 +954,7 @@ const WorldMap: React.FC<WorldMapProps> = ({
           <AiSprite
             key={config.id}
             config={config}
+            emoji={aiEmojis[i] ?? config.emoji}
             xAnim={aiAnims[i].xAnim}
             yAnim={aiAnims[i].yAnim}
             alive={aiAliveState[i]}

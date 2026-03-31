@@ -28,10 +28,18 @@ export interface Stage {
   foodRequired: number;
   /** Passive food income per second */
   passiveIncome: number;
-  /** Theme colour for this stage */
+  /** Theme colour for this stage (reflects the biome) */
   color: string;
   /** Food earned per click */
   clickPower: number;
+  /** Emojis used for collectible food items in this biome */
+  foodEmojis: string[];
+  /** Emojis used for prey AI entities in this biome */
+  preyEmojis: string[];
+  /** Emojis used for predator AI entities in this biome */
+  predatorEmojis: string[];
+  /** Emojis used for static world decorations in this biome */
+  decorationEmojis: string[];
 }
 
 /** Shop upgrade configuration */
