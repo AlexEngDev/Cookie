@@ -236,6 +236,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
     saveState({ ...get(), ...newState });
   },
 
+  /** Deduct food when the player is hit by a predator — food cannot go below 0 */
+  loseFood: (amount: number) => {
+    const { food } = get();
+    const newState = { food: Math.max(0, food - amount) };
+    set(newState);
+    saveState({ ...get(), ...newState });
+  },
+
   /** Load previously saved game state from AsyncStorage */
   loadSavedState: async () => {
     try {

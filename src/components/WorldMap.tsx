@@ -27,6 +27,29 @@ const COLLISION_RADIUS = 55;
 /** Creature stops moving once it is within this many world units of the target */
 const MOVEMENT_STOP_DIST = 2;
 
+// ─── AI entity constants ──────────────────────────────────────────────────────
+
+/** Distance at which prey starts fleeing from the player */
+const PREY_SCARE_RADIUS = 200;
+/** Distance at which a predator starts chasing the player */
+const PREDATOR_AGGRO_RADIUS = 300;
+/** Distance for player ↔ AI collision */
+const AI_COLLISION_RADIUS = 50;
+/** Rendered size (px) of the AI emoji container */
+const AI_ENTITY_SIZE = 40;
+/** Time (ms) before eaten prey respawns */
+const PREY_RESPAWN_MS = 5000;
+/** Duration (ms) of player invulnerability after a predator hit */
+const INVULNERABILITY_MS = 1500;
+/** Number of opacity flashes during the invulnerability window */
+const INVUL_FLASH_COUNT = 5;
+/** Duration (ms) of each half-flash (fade-out or fade-in) — 2 halves × count = INVULNERABILITY_MS */
+const INVUL_FLASH_HALF_DURATION = INVULNERABILITY_MS / INVUL_FLASH_COUNT / 2;
+/** Minimum distance from world edges for AI entities */
+const AI_MARGIN = 60;
+/** Probability per frame that a wandering AI picks a new random direction */
+const WANDER_CHANGE_CHANCE = 0.008;
+
 // ─── Decoration seeds (static, deterministic) ─────────────────────────────────
 
 /** Simple seeded pseudo-random number generator (LCG) */
@@ -101,6 +124,45 @@ function buildInitialFood(): FoodItem[] {
   }));
 }
 
+// ─── AI entity configuration ──────────────────────────────────────────────────
+
+interface AiEntityConfig {
+  id: string;
+  type: 'prey' | 'predator';
+  emoji: string;
+  /** World units per frame this entity moves */
+  speed: number;
+  /** Initial world X position */
+  initX: number;
+  /** Initial world Y position */
+  initY: number;
+}
+
+/** Mutable runtime state for each AI entity (kept in a ref, updated every frame) */
+interface AiEntityMutable {
+  worldX: number;
+  worldY: number;
+  /** Normalised movement direction */
+  dirX: number;
+  dirY: number;
+  /** False while the entity is respawning (not visible) */
+  alive: boolean;
+}
+
+/** Fixed set of AI entities: 5 prey + 3 predators, spread around the map */
+const AI_ENTITY_CONFIGS: AiEntityConfig[] = [
+  // ── Prey ──────────────────────────────────────────────────────────────────
+  { id: 'prey_0', type: 'prey', emoji: '🦐', speed: 1.8, initX: 200,  initY: 200  },
+  { id: 'prey_1', type: 'prey', emoji: '🐛', speed: 1.5, initX: 900,  initY: 300  },
+  { id: 'prey_2', type: 'prey', emoji: '🦠', speed: 2.0, initX: 400,  initY: 900  },
+  { id: 'prey_3', type: 'prey', emoji: '🦐', speed: 1.7, initX: 1000, initY: 700  },
+  { id: 'prey_4', type: 'prey', emoji: '🐛', speed: 1.6, initX: 300,  initY: 550  },
+  // ── Predators ─────────────────────────────────────────────────────────────
+  { id: 'pred_0', type: 'predator', emoji: '🦑', speed: 2.2, initX: 150, initY: 950 },
+  { id: 'pred_1', type: 'predator', emoji: '🦀', speed: 2.0, initX: 950, initY: 150 },
+  { id: 'pred_2', type: 'predator', emoji: '🦈', speed: 2.5, initX: 750, initY: 980 },
+];
+
 // ─── Dot-pattern background rows ─────────────────────────────────────────────
 
 const DOT_SPACING = 60;
@@ -113,6 +175,10 @@ interface WorldMapProps {
   stageIndex: number;
   /** Called when a food item is collected (eaten by collision) */
   onFoodCollected: () => void;
+  /** Called when the player's creature eats a prey entity */
+  onPreyEaten?: () => void;
+  /** Called when a predator collides with the player */
+  onPredatorHit?: () => void;
 }
 
 // ─── FoodSprite ──────────────────────────────────────────────────────────────
@@ -172,6 +238,49 @@ const FoodSprite: React.FC<FoodSpriteProps> = React.memo(
   },
 );
 
+// ─── AiSprite ────────────────────────────────────────────────────────────────
+
+interface AiSpriteProps {
+  config: AiEntityConfig;
+  xAnim: Animated.Value;
+  yAnim: Animated.Value;
+  alive: boolean;
+  cameraX: Animated.Value;
+  cameraY: Animated.Value;
+}
+
+/**
+ * A single AI creature sprite (prey or predator).
+ * Its screen position is derived from its Animated world position minus the camera.
+ * The component re-renders only when `alive` changes.
+ */
+const AiSprite: React.FC<AiSpriteProps> = React.memo(
+  ({ config, xAnim, yAnim, alive, cameraX, cameraY }) => {
+    if (!alive) return null;
+
+    const screenX = Animated.subtract(Animated.subtract(xAnim, AI_ENTITY_SIZE / 2), cameraX);
+    const screenY = Animated.subtract(Animated.subtract(yAnim, AI_ENTITY_SIZE / 2), cameraY);
+
+    return (
+      <Animated.View
+        style={[
+          styles.aiEntity,
+          { left: screenX, top: screenY },
+        ]}
+        pointerEvents="none"
+      >
+        <Text
+          style={
+            config.type === 'predator' ? styles.predatorEmoji : styles.preyEmoji
+          }
+        >
+          {config.emoji}
+        </Text>
+      </Animated.View>
+    );
+  },
+);
+
 // ─── WorldMap ─────────────────────────────────────────────────────────────────
 
 /**
@@ -185,6 +294,8 @@ const FoodSprite: React.FC<FoodSpriteProps> = React.memo(
 const WorldMap: React.FC<WorldMapProps> = ({
   stageIndex,
   onFoodCollected,
+  onPreyEaten = () => {},
+  onPredatorHit = () => {},
 }) => {
   const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -282,6 +393,62 @@ const WorldMap: React.FC<WorldMapProps> = ({
     handleCollectFoodRef.current = handleCollectFood;
   }, [handleCollectFood]);
 
+  // ── AI entities ──────────────────────────────────────────────────────────────
+
+  /** Mutable runtime state for each AI entity — read/written inside the RAF loop */
+  const aiRefs = useRef<AiEntityMutable[]>(
+    AI_ENTITY_CONFIGS.map((cfg) => {
+      const angle = Math.random() * Math.PI * 2;
+      return {
+        worldX: cfg.initX,
+        worldY: cfg.initY,
+        dirX: Math.cos(angle),
+        dirY: Math.sin(angle),
+        alive: true,
+      };
+    }),
+  );
+
+  /** Animated position values for rendering each AI entity (stable, never recreated) */
+  const aiAnims = useRef(
+    AI_ENTITY_CONFIGS.map((cfg) => ({
+      xAnim: new Animated.Value(cfg.initX),
+      yAnim: new Animated.Value(cfg.initY),
+    })),
+  ).current;
+
+  /**
+   * React state mirror of each entity's `alive` flag.
+   * Only used to trigger re-renders when an entity spawns or despawns;
+   * the RAF loop reads `aiRefs.current[i].alive` for performance.
+   */
+  const [aiAliveState, setAiAliveState] = useState<boolean[]>(
+    () => AI_ENTITY_CONFIGS.map(() => true),
+  );
+
+  /** Set to true after a predator hit; cleared when the flash animation ends */
+  const invulRef = useRef(false);
+
+  /** Animated opacity used to flash the player creature during invulnerability */
+  const invulOpacity = useRef(new Animated.Value(1)).current;
+
+  /**
+   * Indices of prey currently mid-respawn.
+   * Prevents duplicate collision triggers while the entity is transitioning.
+   */
+  const respawningPreyRef = useRef(new Set<number>());
+
+  /** Stable refs for callbacks so the RAF loop always calls the latest version */
+  const onPreyEatenRef = useRef(onPreyEaten);
+  useEffect(() => {
+    onPreyEatenRef.current = onPreyEaten;
+  }, [onPreyEaten]);
+
+  const onPredatorHitRef = useRef(onPredatorHit);
+  useEffect(() => {
+    onPredatorHitRef.current = onPredatorHit;
+  }, [onPredatorHit]);
+
   // ── requestAnimationFrame movement loop ─────────────────────────────────────
 
   const rafRef = useRef<number | null>(null);
@@ -329,13 +496,127 @@ const WorldMap: React.FC<WorldMapProps> = ({
         cameraXRef.current = newCamX;
         cameraYRef.current = newCamY;
 
-        // ── Collision detection ────────────────────────────────────────────
+        // ── Collision detection (food) ──────────────────────────────────────
         for (const food of foodItemsRef.current) {
           if (food.collected || collectingIdsRef.current.has(food.id)) continue;
           const fdx = food.worldX - newX;
           const fdy = food.worldY - newY;
           if (fdx * fdx + fdy * fdy < COLLISION_RADIUS * COLLISION_RADIUS) {
             handleCollectFoodRef.current(food.id);
+          }
+        }
+      }
+
+      // ── AI entity update (runs every frame regardless of player movement) ──
+      const playerX = creatureXRef.current;
+      const playerY = creatureYRef.current;
+
+      for (let i = 0; i < aiRefs.current.length; i++) {
+        const entity = aiRefs.current[i];
+        if (!entity.alive) continue;
+
+        const config = AI_ENTITY_CONFIGS[i];
+        const pdx = playerX - entity.worldX;
+        const pdy = playerY - entity.worldY;
+        const pDistSq = pdx * pdx + pdy * pdy;
+        const pDist = Math.sqrt(pDistSq);
+
+        if (config.type === 'prey') {
+          if (pDist < PREY_SCARE_RADIUS && pDist > 0) {
+            // Flee: run directly away from the player
+            entity.dirX = -pdx / pDist;
+            entity.dirY = -pdy / pDist;
+          } else if (Math.random() < WANDER_CHANGE_CHANCE) {
+            // Occasionally pick a new random wander direction
+            const angle = Math.random() * Math.PI * 2;
+            entity.dirX = Math.cos(angle);
+            entity.dirY = Math.sin(angle);
+          }
+        } else {
+          // Predator
+          if (pDist < PREDATOR_AGGRO_RADIUS && pDist > 0) {
+            // Chase: head straight toward the player
+            entity.dirX = pdx / pDist;
+            entity.dirY = pdy / pDist;
+          } else if (Math.random() < WANDER_CHANGE_CHANCE) {
+            const angle = Math.random() * Math.PI * 2;
+            entity.dirX = Math.cos(angle);
+            entity.dirY = Math.sin(angle);
+          }
+        }
+
+        // Move entity at its configured speed
+        let nextX = entity.worldX + entity.dirX * config.speed;
+        let nextY = entity.worldY + entity.dirY * config.speed;
+
+        // Bounce off world edges
+        if (nextX < AI_MARGIN) {
+          nextX = AI_MARGIN;
+          entity.dirX = Math.abs(entity.dirX);
+        } else if (nextX > WORLD_SIZE - AI_MARGIN) {
+          nextX = WORLD_SIZE - AI_MARGIN;
+          entity.dirX = -Math.abs(entity.dirX);
+        }
+        if (nextY < AI_MARGIN) {
+          nextY = AI_MARGIN;
+          entity.dirY = Math.abs(entity.dirY);
+        } else if (nextY > WORLD_SIZE - AI_MARGIN) {
+          nextY = WORLD_SIZE - AI_MARGIN;
+          entity.dirY = -Math.abs(entity.dirY);
+        }
+
+        entity.worldX = nextX;
+        entity.worldY = nextY;
+
+        // Sync position Animated values for rendering
+        aiAnims[i].xAnim.setValue(nextX);
+        aiAnims[i].yAnim.setValue(nextY);
+
+        // ── Collision: AI ↔ player ──────────────────────────────────────────
+        if (pDistSq < AI_COLLISION_RADIUS * AI_COLLISION_RADIUS) {
+          if (config.type === 'prey' && !respawningPreyRef.current.has(i)) {
+            // Prey eaten by player: despawn, award food, respawn after delay
+            entity.alive = false;
+            respawningPreyRef.current.add(i);
+            setAiAliveState((prev) => prev.map((v, idx) => (idx === i ? false : v)));
+            onPreyEatenRef.current();
+
+            setTimeout(() => {
+              const spawnX = AI_MARGIN + Math.random() * (WORLD_SIZE - AI_MARGIN * 2);
+              const spawnY = AI_MARGIN + Math.random() * (WORLD_SIZE - AI_MARGIN * 2);
+              const angle = Math.random() * Math.PI * 2;
+              entity.worldX = spawnX;
+              entity.worldY = spawnY;
+              entity.dirX = Math.cos(angle);
+              entity.dirY = Math.sin(angle);
+              entity.alive = true;
+              aiAnims[i].xAnim.setValue(spawnX);
+              aiAnims[i].yAnim.setValue(spawnY);
+              respawningPreyRef.current.delete(i);
+              setAiAliveState((prev) => prev.map((v, idx) => (idx === i ? true : v)));
+            }, PREY_RESPAWN_MS);
+          } else if (config.type === 'predator' && !invulRef.current) {
+            // Predator hits player: deduct food and flash creature for 1.5 s
+            invulRef.current = true;
+            onPredatorHitRef.current();
+            Animated.loop(
+              Animated.sequence([
+                Animated.timing(invulOpacity, {
+                  toValue: 0.25,
+                  duration: INVUL_FLASH_HALF_DURATION,
+                  useNativeDriver: true,
+                }),
+                Animated.timing(invulOpacity, {
+                  toValue: 1,
+                  duration: INVUL_FLASH_HALF_DURATION,
+                  useNativeDriver: true,
+                }),
+              ]),
+              { iterations: INVUL_FLASH_COUNT },
+            ).start(() => {
+              invulOpacity.setValue(1);
+              invulRef.current = false;
+            });
           }
         }
       }
@@ -446,6 +727,19 @@ const WorldMap: React.FC<WorldMapProps> = ({
           />
         ))}
 
+        {/* ── AI entities (prey and predators) ────────────────────────────── */}
+        {AI_ENTITY_CONFIGS.map((config, i) => (
+          <AiSprite
+            key={config.id}
+            config={config}
+            xAnim={aiAnims[i].xAnim}
+            yAnim={aiAnims[i].yAnim}
+            alive={aiAliveState[i]}
+            cameraX={cameraXAnim}
+            cameraY={cameraYAnim}
+          />
+        ))}
+
         {/* ── Player creature ──────────────────────────────────────────────── */}
         <Animated.View
           style={[
@@ -453,6 +747,7 @@ const WorldMap: React.FC<WorldMapProps> = ({
             {
               left: creatureLeft,
               top: creatureTop,
+              opacity: invulOpacity,
               transform: [{ rotate: creatureRotate }],
             },
           ]}
@@ -526,6 +821,20 @@ const styles = StyleSheet.create({
     width: CREATURE_SIZE,
     height: CREATURE_SIZE,
     zIndex: 20,
+  },
+  aiEntity: {
+    position: 'absolute',
+    width: AI_ENTITY_SIZE,
+    height: AI_ENTITY_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 12,
+  },
+  preyEmoji: {
+    fontSize: 22,
+  },
+  predatorEmoji: {
+    fontSize: 28,
   },
 });
 
