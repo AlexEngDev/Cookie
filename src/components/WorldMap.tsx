@@ -180,6 +180,19 @@ const AI_ENTITY_CONFIGS: AiEntityConfig[] = [
   { id: 'pred_2', type: 'predator', emoji: '🦈', speed: 2.5, initX: 750, initY: 980 },
 ];
 
+// ─── Minimap constants ────────────────────────────────────────────────────────
+
+const MINIMAP_SIZE = 100;
+/** Half-size of each blip, used to centre blips on their mapped position */
+const MINIMAP_PLAYER_BLIP = 6;
+const MINIMAP_FOOD_BLIP = 4;
+const MINIMAP_AI_BLIP = 4;
+
+/** Maps a world coordinate to a pixel offset inside the minimap container, centred on the blip */
+function toMinimap(worldCoord: number, blipSize: number): number {
+  return (worldCoord / WORLD_SIZE) * MINIMAP_SIZE - blipSize / 2;
+}
+
 // ─── Dot-pattern background rows ─────────────────────────────────────────────
 
 const DOT_SPACING = 60;
@@ -307,6 +320,51 @@ const AiSprite: React.FC<AiSpriteProps> = React.memo(
     );
   },
 );
+
+// ─── Minimap ──────────────────────────────────────────────────────────────────
+
+interface MinimapBlip {
+  xAnim: Animated.Value;
+  yAnim: Animated.Value;
+}
+
+interface MinimapProps {
+  playerBlip: MinimapBlip;
+  foodBlips: MinimapBlip[];
+  aiBlips: Array<MinimapBlip & { type: 'prey' | 'predator' }>;
+}
+
+/**
+ * Semi-transparent minimap overlay rendering the entire world at a glance.
+ * Blip positions are driven by Animated.Values updated in the RAF loop, so
+ * the component itself never re-renders during gameplay.
+ */
+const Minimap: React.FC<MinimapProps> = React.memo(({ playerBlip, foodBlips, aiBlips }) => (
+  <View style={minimapStyles.container} pointerEvents="none">
+    {/* Food blips — green */}
+    {foodBlips.map((blip, i) => (
+      <Animated.View
+        key={`mmap_food_${i}`}
+        style={[minimapStyles.blip, minimapStyles.foodBlip, { left: blip.xAnim, top: blip.yAnim }]}
+      />
+    ))}
+    {/* AI blips — blue for prey, red for predators */}
+    {aiBlips.map((blip, i) => (
+      <Animated.View
+        key={`mmap_ai_${i}`}
+        style={[
+          minimapStyles.blip,
+          blip.type === 'prey' ? minimapStyles.preyBlip : minimapStyles.predatorBlip,
+          { left: blip.xAnim, top: blip.yAnim },
+        ]}
+      />
+    ))}
+    {/* Player blip — white, slightly larger */}
+    <Animated.View
+      style={[minimapStyles.blip, minimapStyles.playerBlip, { left: playerBlip.xAnim, top: playerBlip.yAnim }]}
+    />
+  </View>
+));
 
 // ─── WorldMap ─────────────────────────────────────────────────────────────────
 
@@ -638,6 +696,28 @@ const WorldMap: React.FC<WorldMapProps> = ({
 
   const rafRef = useRef<number | null>(null);
 
+  // ── Minimap Animated values (updated every frame via setValue in the RAF loop) ─
+
+  const minimapPlayerBlip = useRef<MinimapBlip>({
+    xAnim: new Animated.Value(toMinimap(CREATURE_START_X, MINIMAP_PLAYER_BLIP)),
+    yAnim: new Animated.Value(toMinimap(CREATURE_START_Y, MINIMAP_PLAYER_BLIP)),
+  }).current;
+
+  const minimapFoodBlips = useRef<MinimapBlip[]>(
+    Array.from({ length: FOOD_COUNT }, () => ({
+      xAnim: new Animated.Value(-10),
+      yAnim: new Animated.Value(-10),
+    })),
+  ).current;
+
+  const minimapAiBlips = useRef(
+    AI_ENTITY_CONFIGS.map((cfg) => ({
+      xAnim: new Animated.Value(toMinimap(cfg.initX, MINIMAP_AI_BLIP)),
+      yAnim: new Animated.Value(toMinimap(cfg.initY, MINIMAP_AI_BLIP)),
+      type: cfg.type,
+    })),
+  ).current;
+
   /**
    * Shared helper: immediately despawn an AI entity, fire its "eaten" callback,
    * then respawn it at a random position after PREY_RESPAWN_MS milliseconds.
@@ -862,6 +942,33 @@ const WorldMap: React.FC<WorldMapProps> = ({
         }
       }
 
+      // ── Minimap blip updates ────────────────────────────────────────────────
+      // Player blip
+      minimapPlayerBlip.xAnim.setValue(toMinimap(creatureXRef.current, MINIMAP_PLAYER_BLIP));
+      minimapPlayerBlip.yAnim.setValue(toMinimap(creatureYRef.current, MINIMAP_PLAYER_BLIP));
+      // Food blips
+      for (let fi = 0; fi < minimapFoodBlips.length; fi++) {
+        const food = foodItemsRef.current[fi];
+        if (!food || food.collected) {
+          minimapFoodBlips[fi].xAnim.setValue(-10);
+          minimapFoodBlips[fi].yAnim.setValue(-10);
+        } else {
+          minimapFoodBlips[fi].xAnim.setValue(toMinimap(food.worldX, MINIMAP_FOOD_BLIP));
+          minimapFoodBlips[fi].yAnim.setValue(toMinimap(food.worldY, MINIMAP_FOOD_BLIP));
+        }
+      }
+      // AI blips
+      for (let ai = 0; ai < minimapAiBlips.length; ai++) {
+        const entity = aiRefs.current[ai];
+        if (!entity || !entity.alive) {
+          minimapAiBlips[ai].xAnim.setValue(-10);
+          minimapAiBlips[ai].yAnim.setValue(-10);
+        } else {
+          minimapAiBlips[ai].xAnim.setValue(toMinimap(entity.worldX, MINIMAP_AI_BLIP));
+          minimapAiBlips[ai].yAnim.setValue(toMinimap(entity.worldY, MINIMAP_AI_BLIP));
+        }
+      }
+
       rafRef.current = requestAnimationFrame(loop);
     };
 
@@ -1009,6 +1116,13 @@ const WorldMap: React.FC<WorldMapProps> = ({
           />
         </Animated.View>
       </Animated.View>
+
+      {/* ── Minimap overlay ──────────────────────────────────────────────── */}
+      <Minimap
+        playerBlip={minimapPlayerBlip}
+        foodBlips={minimapFoodBlips}
+        aiBlips={minimapAiBlips}
+      />
     </View>
   );
 };
@@ -1115,6 +1229,46 @@ const styles = StyleSheet.create({
   },
   predatorEmoji: {
     fontSize: 28,
+  },
+});
+
+const minimapStyles = StyleSheet.create({
+  container: {
+    position: 'absolute',
+    bottom: 200,
+    right: 12,
+    width: MINIMAP_SIZE,
+    height: MINIMAP_SIZE,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+    overflow: 'hidden',
+    zIndex: 50,
+  },
+  blip: {
+    position: 'absolute',
+    borderRadius: 99,
+  },
+  playerBlip: {
+    width: MINIMAP_PLAYER_BLIP,
+    height: MINIMAP_PLAYER_BLIP,
+    backgroundColor: '#ffffff',
+  },
+  foodBlip: {
+    width: MINIMAP_FOOD_BLIP,
+    height: MINIMAP_FOOD_BLIP,
+    backgroundColor: '#4cff6e',
+  },
+  preyBlip: {
+    width: MINIMAP_AI_BLIP,
+    height: MINIMAP_AI_BLIP,
+    backgroundColor: '#6ab0ff',
+  },
+  predatorBlip: {
+    width: MINIMAP_AI_BLIP,
+    height: MINIMAP_AI_BLIP,
+    backgroundColor: '#ff4545',
   },
 });
 
