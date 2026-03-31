@@ -200,6 +200,8 @@ interface WorldMapProps {
   onPredatorHit?: () => void;
   /** Called when the player (now bigger) eats a predator */
   onPredatorEaten?: () => void;
+  /** Current mutation levels — affects speed, food radius, and visuals */
+  mutations?: { speedLevel: number; spikesLevel: number; jawsLevel: number };
 }
 
 // ─── FoodSprite ──────────────────────────────────────────────────────────────
@@ -319,6 +321,7 @@ const WorldMap: React.FC<WorldMapProps> = ({
   onPreyEaten = () => {},
   onPredatorHit = () => {},
   onPredatorEaten = () => {},
+  mutations,
 }) => {
   const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -369,6 +372,20 @@ const WorldMap: React.FC<WorldMapProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [playerFood],
   );
+
+  // ── Mutation level refs (read by the RAF loop every frame) ──────────────────
+
+  /** Speed mutation level — multiplies creature movement speed */
+  const speedLevelRef = useRef(mutations?.speedLevel ?? 0);
+  useEffect(() => {
+    speedLevelRef.current = mutations?.speedLevel ?? 0;
+  }, [mutations?.speedLevel]);
+
+  /** Jaws mutation level — boosts food collision radius */
+  const jawsLevelRef = useRef(mutations?.jawsLevel ?? 0);
+  useEffect(() => {
+    jawsLevelRef.current = mutations?.jawsLevel ?? 0;
+  }, [mutations?.jawsLevel]);
 
   // ── Food state ──────────────────────────────────────────────────────────────
 
@@ -573,12 +590,16 @@ const WorldMap: React.FC<WorldMapProps> = ({
       // ── Dynamic radii based on current player size ────────────────────────
       const pSize = playerSizeRef.current;
       const sizeRatio = pSize / BASE_PLAYER_SIZE;
-      const dynFoodRadius = Math.min(MAX_FOOD_COLLISION_RADIUS, COLLISION_RADIUS * sizeRatio);
+      // Jaws mutation expands food collection radius (each level adds 20%)
+      const jawsRadiusBonus = 1 + jawsLevelRef.current * 0.2;
+      const dynFoodRadius = Math.min(MAX_FOOD_COLLISION_RADIUS, COLLISION_RADIUS * sizeRatio * jawsRadiusBonus);
       const dynAiRadius = Math.min(MAX_AI_COLLISION_RADIUS, AI_COLLISION_RADIUS * sizeRatio);
 
       if (dist > MOVEMENT_STOP_DIST) {
+        // Speed mutation multiplies base movement speed (each level adds 25%)
+        const effectiveSpeed = CREATURE_SPEED * (1 + speedLevelRef.current * 0.25);
         // Advance toward the target (cap at remaining distance to avoid overshoot)
-        const step = Math.min(CREATURE_SPEED, dist);
+        const step = Math.min(effectiveSpeed, dist);
         const nx = dx / dist;
         const ny = dy / dist;
 
@@ -857,6 +878,16 @@ const WorldMap: React.FC<WorldMapProps> = ({
             },
           ]}
         >
+          {/* Mutation visuals — small icons around the creature sprite */}
+          {mutations && mutations.speedLevel > 0 && (
+            <Text style={styles.mutIconTop} accessibilityLabel="Fins mutation active">〰️</Text>
+          )}
+          {mutations && mutations.spikesLevel > 0 && (
+            <Text style={styles.mutIconRight} accessibilityLabel="Spikes mutation active">🗡️</Text>
+          )}
+          {mutations && mutations.jawsLevel > 0 && (
+            <Text style={styles.mutIconBottom} accessibilityLabel="Jaws mutation active">🦷</Text>
+          )}
           <Creature
             stageIndex={stageIndex}
           />
@@ -926,6 +957,34 @@ const styles = StyleSheet.create({
     width: CREATURE_SIZE,
     height: CREATURE_SIZE,
     zIndex: 20,
+  },
+  mutIconTop: {
+    position: 'absolute',
+    top: 8,
+    left: 0,
+    right: 0,
+    textAlign: 'center',
+    fontSize: 16,
+    zIndex: 21,
+  },
+  mutIconRight: {
+    position: 'absolute',
+    right: 8,
+    top: 0,
+    bottom: 0,
+    textAlignVertical: 'center',
+    fontSize: 16,
+    zIndex: 21,
+    lineHeight: CREATURE_SIZE,
+  },
+  mutIconBottom: {
+    position: 'absolute',
+    bottom: 8,
+    left: 0,
+    right: 0,
+    textAlign: 'center',
+    fontSize: 16,
+    zIndex: 21,
   },
   aiEntity: {
     position: 'absolute',

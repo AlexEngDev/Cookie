@@ -47,6 +47,7 @@ export default function GameScreen() {
   const hapticsEnabled = useGameStore((state) => state.hapticsEnabled);
   const toggleHaptics = useGameStore((state) => state.toggleHaptics);
   const unlockedAchievements = useGameStore((state) => state.unlockedAchievements);
+  const mutations = useGameStore((state) => state.mutations);
 
   // Animated value for interpolating the background colour between stages
   const bgColorAnim = useRef(new Animated.Value(0)).current;
@@ -100,7 +101,11 @@ export default function GameScreen() {
   const handleFoodCollected = useCallback(() => {
     tapFeedback();
     clickFood();
-  }, [tapFeedback, clickFood]);
+    // Jaws mutation bonus: extra food per collected item
+    if (mutations.jawsLevel > 0) {
+      addPassiveFood(mutations.jawsLevel * 2);
+    }
+  }, [tapFeedback, clickFood, addPassiveFood, mutations.jawsLevel]);
 
   /** Player eats a prey creature — award bonus food and trigger haptic feedback */
   const handlePreyEaten = useCallback(() => {
@@ -115,11 +120,13 @@ export default function GameScreen() {
     addPassiveFood(20);
   }, [tapFeedback, addPassiveFood]);
 
-  /** A predator hits the player — deduct food and trigger haptic feedback */
+  /** A predator hits the player — deduct food and trigger haptic feedback.
+   *  Spikes mutation reduces food lost (2 per level, min 0). */
   const handlePredatorHit = useCallback(() => {
     tapFeedback();
-    loseFood(10);
-  }, [tapFeedback, loseFood]);
+    const foodLost = Math.max(0, 10 - mutations.spikesLevel * 2);
+    loseFood(foodLost);
+  }, [tapFeedback, loseFood, mutations.spikesLevel]);
 
   /** Evolve to the next stage and trigger haptic feedback */
   const handleEvolve = () => {
@@ -151,6 +158,7 @@ export default function GameScreen() {
           onPreyEaten={handlePreyEaten}
           onPredatorEaten={handlePredatorEaten}
           onPredatorHit={handlePredatorHit}
+          mutations={mutations}
         />
 
         {/* Fixed HUD — always on top, touches pass through to world behind */}
@@ -172,6 +180,12 @@ export default function GameScreen() {
                 onPress={() => router.push('/achievements')}
               >
                 <Text style={styles.topButtonText}>🏆</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.topButton}
+                onPress={() => router.push('/mutations')}
+              >
+                <Text style={styles.topButtonText}>🧬</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.topButton}
