@@ -17,6 +17,7 @@ import { STAGES, MAX_STAGE } from '../src/constants/stages';
 import { Colors } from '../src/constants/colors';
 import StageBar from '../src/components/StageBar';
 import ResourcePanel from '../src/components/ResourcePanel';
+import HealthBar from '../src/components/HealthBar';
 import EvolveButton from '../src/components/EvolveButton';
 import ParticleSystem, { ParticleSystemRef } from '../src/components/ParticleSystem';
 import WorldMap from '../src/components/WorldMap';
@@ -53,7 +54,6 @@ export default function GameScreen() {
   const clickCount = useGameStore((state) => state.clickCount);
   const clickFood = useGameStore((state) => state.clickFood);
   const addPassiveFood = useGameStore((state) => state.addPassiveFood);
-  const loseFood = useGameStore((state) => state.loseFood);
   const evolve = useGameStore((state) => state.evolve);
   const reset = useGameStore((state) => state.reset);
   const loadSavedState = useGameStore((state) => state.loadSavedState);
@@ -63,9 +63,20 @@ export default function GameScreen() {
   const mutations = useGameStore((state) => state.mutations);
   const dietScore = useGameStore((state) => state.dietScore);
   const eatFoodType = useGameStore((state) => state.eatFoodType);
+  const currentHealth = useGameStore((state) => state.currentHealth);
+  const maxHealth = useGameStore((state) => state.maxHealth);
+  const deathCount = useGameStore((state) => state.deathCount);
+  const takeDamage = useGameStore((state) => state.takeDamage);
+  const heal = useGameStore((state) => state.heal);
 
   // Animated value for interpolating the background colour between stages
   const bgColorAnim = useRef(new Animated.Value(0)).current;
+
+  // Animated value for the death flash overlay (0 = hidden, 1 = visible)
+  const deathOverlayAnim = useRef(new Animated.Value(0)).current;
+
+  // Counts food items collected since the last heal — heal 1 HP every 10 items
+  const foodEatenSinceHealRef = useRef(0);
 
   // Ref to the particle system — used to trigger the tap effect
   const particleRef = useRef<ParticleSystemRef>(null);
@@ -101,6 +112,28 @@ export default function GameScreen() {
     prevAchievementCount.current = unlockedAchievements.length;
   }, [unlockedAchievements.length, achievementFeedback]);
 
+  // Show a full-screen red flash whenever the player dies
+  const prevDeathCount = useRef(deathCount);
+  useEffect(() => {
+    if (deathCount > prevDeathCount.current) {
+      prevDeathCount.current = deathCount;
+      // Reset the food-eaten-for-heal counter so the player can't heal right after respawning
+      foodEatenSinceHealRef.current = 0;
+      Animated.sequence([
+        Animated.timing(deathOverlayAnim, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(deathOverlayAnim, {
+          toValue: 0,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [deathCount, deathOverlayAnim]);
+
   // Interpolate background colour across all four stage colours
   const backgroundColor = bgColorAnim.interpolate({
     inputRange: [0, 1, 2, 3],
@@ -126,16 +159,24 @@ export default function GameScreen() {
     } else if (MEAT_EMOJIS.has(emoji)) {
       eatFoodType('meat');
     }
-  }, [tapFeedback, clickFood, addPassiveFood, mutations.jawsLevel, eatFoodType]);
+    // Healing mechanic: heal 1 HP every 10 food items collected
+    foodEatenSinceHealRef.current += 1;
+    if (foodEatenSinceHealRef.current >= 10) {
+      foodEatenSinceHealRef.current = 0;
+      heal(1);
+    }
+  }, [tapFeedback, clickFood, addPassiveFood, mutations.jawsLevel, eatFoodType, heal]);
 
-  /** Player eats a prey creature — award bonus food and trigger haptic feedback */
+  /** Player eats a prey creature — award bonus food, heal, and trigger haptic feedback */
   const handlePreyEaten = useCallback(() => {
     tapFeedback();
     // Carnivore diet bonus: +50% prey food when score > 30
     const carnivoreMultiplier = dietScore > 30 ? 1.5 : 1;
     addPassiveFood(stage.clickPower * 5 * carnivoreMultiplier);
     eatFoodType('meat');
-  }, [tapFeedback, addPassiveFood, stage.clickPower, dietScore, eatFoodType]);
+    // Eating prey always attempts to heal 1 HP
+    heal(1);
+  }, [tapFeedback, addPassiveFood, stage.clickPower, dietScore, eatFoodType, heal]);
 
   /** Player (now bigger) eats a predator — award a large food bonus */
   const handlePredatorEaten = useCallback(() => {
@@ -144,13 +185,16 @@ export default function GameScreen() {
     eatFoodType('meat');
   }, [tapFeedback, addPassiveFood, eatFoodType]);
 
-  /** A predator hits the player — deduct food and trigger haptic feedback.
-   *  Spikes mutation reduces food lost (2 per level, min 0). */
+  /** A predator hits the player — deduct 1 HP and trigger haptic feedback.
+   *  Spikes mutation at max level (5) fully blocks the damage. */
   const handlePredatorHit = useCallback(() => {
     tapFeedback();
-    const foodLost = Math.max(0, 10 - mutations.spikesLevel * 2);
-    loseFood(foodLost);
-  }, [tapFeedback, loseFood, mutations.spikesLevel]);
+    // Spikes fully block damage at level 5 (5 × 2 = 10 ≥ 10)
+    const damageBlocked = mutations.spikesLevel * 2 >= 10;
+    if (!damageBlocked) {
+      takeDamage(1);
+    }
+  }, [tapFeedback, takeDamage, mutations.spikesLevel]);
 
   /** Evolve to the next stage and trigger haptic feedback */
   const handleEvolve = () => {
@@ -229,6 +273,9 @@ export default function GameScreen() {
             clickCount={clickCount}
           />
 
+          {/* Health bar: heart icons showing current / max HP */}
+          <HealthBar currentHealth={currentHealth} maxHealth={maxHealth} />
+
           {/* Diet scale: shows Herbivore ↔ Omnivore ↔ Carnivore balance */}
           <DietBar dietScore={dietScore} />
 
@@ -261,6 +308,14 @@ export default function GameScreen() {
           stageIndex={currentStage}
           clickPower={stage.clickPower}
         />
+
+        {/* Death flash overlay — full-screen red flash when the player dies */}
+        <Animated.View
+          style={[styles.deathOverlay, { opacity: deathOverlayAnim }]}
+          pointerEvents="none"
+        >
+          <Text style={styles.deathText}>💀 You died! Food lost.</Text>
+        </Animated.View>
 
       </Animated.View>
     </GestureHandlerRootView>
@@ -321,6 +376,18 @@ const styles = StyleSheet.create({
   resetText: {
     fontSize: 13,
     color: 'rgba(255,255,255,0.4)',
+  },
+  deathOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: Colors.ui.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deathText: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    textAlign: 'center',
   },
 });
 
