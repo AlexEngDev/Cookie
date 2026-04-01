@@ -6,9 +6,33 @@ import {
   Text,
   View,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { STAGES } from '../../src/constants/stages';
 import Creature from './Creature';
 import DashButton from './DashButton';
+import {
+  playDashSound,
+  playDamageSound,
+  playEatPreySound,
+  playEatSound,
+} from '../utils/audioManager';
+
+// ─── Haptic helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Thin wrappers around expo-haptics that swallow errors silently.
+ * On platforms that don't support haptics (e.g. web) Expo already no-ops, but
+ * the try/catch gives an extra safety net against unexpected rejections.
+ */
+const triggerLightHaptic = () => {
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+};
+const triggerMediumHaptic = () => {
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+};
+const triggerDamageHaptic = () => {
+  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+};
 
 // ─── World constants ──────────────────────────────────────────────────────────
 
@@ -550,6 +574,8 @@ const WorldMap: React.FC<WorldMapProps> = ({
         prev.map((item) => (item.id === id ? { ...item, collected: true } : item)),
       );
       onFoodCollected(collectedEmoji);
+      triggerLightHaptic();
+      playEatSound();
 
       setTimeout(() => {
         setFoodItems((prev) => {
@@ -973,14 +999,20 @@ const WorldMap: React.FC<WorldMapProps> = ({
           if (config.type === 'prey' && !respawningPreyRef.current.has(i)) {
             // Prey eaten by player: despawn, award food, respawn after delay
             despawnAndRespawnRef.current(i, respawningPreyRef, onPreyEatenRef);
+            triggerMediumHaptic();
+            playEatPreySound();
           } else if (config.type === 'predator') {
             if (playerBiggerThanPredator && !respawningPredatorRef.current.has(i)) {
               // Player is bigger: eat the predator, award bonus food, respawn it
               despawnAndRespawnRef.current(i, respawningPredatorRef, onPredatorEatenRef);
+              triggerMediumHaptic();
+              playEatPreySound();
             } else if (!playerBiggerThanPredator && !invulRef.current) {
               // Player is smaller: predator damages the player
               invulRef.current = true;
               onPredatorHitRef.current();
+              triggerDamageHaptic();
+              playDamageSound();
               Animated.loop(
                 Animated.sequence([
                   Animated.timing(invulOpacity, {
@@ -1063,6 +1095,8 @@ const WorldMap: React.FC<WorldMapProps> = ({
     dashStartTimeRef.current = Date.now();
     setIsDashingUI(true);
     onDashActivated?.(DASH_FOOD_COST);
+    triggerMediumHaptic();
+    playDashSound();
   }, [playerFood, onDashActivated]);
 
   // ── Background colour ───────────────────────────────────────────────────────
