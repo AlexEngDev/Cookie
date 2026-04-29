@@ -264,6 +264,14 @@ export default function GameScreen() {
               >
                 <Text style={styles.topButtonText}>🛍️</Text>
               </TouchableOpacity>
+              {currentStage >= 3 && (
+                <TouchableOpacity
+                  style={styles.topButton}
+                  onPress={() => router.push('/buildings')}
+                >
+                  <Text style={styles.topButtonText}>🏛️</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
 
