@@ -166,6 +166,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const { food, totalFood, unlockedAchievements, buildings } = get();
     const achievementPassiveMult = calcAchievementPassiveMultiplier(unlockedAchievements);
     const buildingIncome = calcTotalBuildingIncome(buildings);
+    // Building income is intentionally included in the achievement multiplier bonus,
+    // since achievement rewards apply to all passive income sources.
     const gained = (amount + buildingIncome) * (1 + achievementPassiveMult);
     const newState = {
       food: food + gained,
