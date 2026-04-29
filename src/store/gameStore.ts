@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GameStore, GameState } from '../types';
 import { STAGES, MAX_STAGE } from '../constants/stages';
 import { UPGRADES, getUpgradeCost } from '../constants/upgrades';
+import { BUILDINGS, getBuildingCost, calcTotalBuildingIncome } from '../constants/buildings';
 import { ACHIEVEMENTS } from '../constants/achievements';
 
 // AsyncStorage key for persisting game state
@@ -16,6 +17,7 @@ const initialState: GameState = {
   clickCount: 0,
   abilities: [],
   upgrades: {},
+  buildings: {},
   unlockedAchievements: [],
   hapticsEnabled: true,
   mutations: { speedLevel: 0, spikesLevel: 0, jawsLevel: 0 },
@@ -161,9 +163,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   /** Add passive food income (called by the game loop hook) */
   addPassiveFood: (amount: number) => {
-    const { food, totalFood, unlockedAchievements } = get();
+    const { food, totalFood, unlockedAchievements, buildings } = get();
     const achievementPassiveMult = calcAchievementPassiveMultiplier(unlockedAchievements);
-    const gained = amount * (1 + achievementPassiveMult);
+    const buildingIncome = calcTotalBuildingIncome(buildings);
+    // Building income is intentionally included in the achievement multiplier bonus,
+    // since achievement rewards apply to all passive income sources.
+    const gained = (amount + buildingIncome) * (1 + achievementPassiveMult);
     const newState = {
       food: food + gained,
       totalFood: totalFood + gained,
@@ -187,6 +192,24 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     const newUpgrades = { ...upgrades, [upgradeId]: currentLevel + 1 };
     const newState = { food: food - cost, upgrades: newUpgrades };
+    set(newState);
+    saveState({ ...get(), ...newState });
+  },
+
+  /** Purchase one level of the specified building if affordable */
+  buyBuilding: (buildingId: string) => {
+    const { food, buildings } = get();
+    const building = BUILDINGS.find((b) => b.id === buildingId);
+    if (!building) return;
+
+    const currentLevel = buildings[buildingId] ?? 0;
+    if (currentLevel >= building.maxLevel) return;
+
+    const cost = getBuildingCost(building, currentLevel);
+    if (food < cost) return;
+
+    const newBuildings = { ...buildings, [buildingId]: currentLevel + 1 };
+    const newState = { food: food - cost, buildings: newBuildings };
     set(newState);
     saveState({ ...get(), ...newState });
   },
@@ -317,6 +340,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         const parsed: GameState = JSON.parse(saved);
         // Ensure upgrades field exists for saves created before this update
         if (!parsed.upgrades) parsed.upgrades = {};
+        // Ensure buildings field exists for saves created before the buildings system
+        if (!parsed.buildings) parsed.buildings = {};
         // Ensure unlockedAchievements field exists for older saves
         if (!parsed.unlockedAchievements) parsed.unlockedAchievements = [];
         // Ensure hapticsEnabled exists for older saves (default: true)

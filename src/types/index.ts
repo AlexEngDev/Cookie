@@ -84,6 +84,8 @@ export interface GameState {
   abilities: string[];
   /** Purchased upgrade levels, keyed by upgrade id */
   upgrades: Record<string, number>;
+  /** Purchased building levels, keyed by building id (stage 3 "Mind" mechanic) */
+  buildings: Record<string, number>;
   /** List of unlocked achievement IDs */
   unlockedAchievements: string[];
   /** Whether haptic feedback is enabled (toggled by the mute button) */
@@ -113,6 +115,11 @@ export interface GameActions {
   addPassiveFood: (amount: number) => void;
   /** Purchase one level of an upgrade */
   buyUpgrade: (upgradeId: string) => void;
+  /**
+   * Purchase one level of a civilization building (stage 3 "Mind" mechanic).
+   * Deducts the cost from food and increments the building level.
+   */
+  buyBuilding: (buildingId: string) => void;
   /** Check and unlock any newly earned achievements */
   checkAchievements: () => void;
   /** Reset the game to its initial state */
